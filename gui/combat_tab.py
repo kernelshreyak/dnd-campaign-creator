@@ -244,7 +244,7 @@ class ActionDialog(QDialog):
                 f"{self.combatant['Name']}'s {action['name']} strikes {target['Name']}."
             )
             resp = openai.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-4.1-mini",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=50,
                 temperature=0.9,
@@ -255,8 +255,12 @@ class ActionDialog(QDialog):
         except Exception:
             pass
 
+        # ✅ ensure table refreshes to show updated HP
+        parent_tab = self.parent()
+        if parent_tab and hasattr(parent_tab, "refresh_table"):
+            parent_tab.refresh_table()
 
-# ---------- CombatTab ----------
+
 class CombatTab(QWidget):
     def __init__(self, main_window):
         super().__init__()
@@ -283,7 +287,8 @@ class CombatTab(QWidget):
         add_layout.addStretch(1)
         right_layout.addLayout(add_layout)
 
-        self.table = QTableWidget(0, 14)
+        # Table without “Deal Damage” column
+        self.table = QTableWidget(0, 13)
         self.table.setHorizontalHeaderLabels(
             [
                 "Name",
@@ -298,13 +303,13 @@ class CombatTab(QWidget):
                 "CHA",
                 "Initiative",
                 "Actions",
-                "Deal Damage",
                 "Remove",
             ]
         )
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         right_layout.addWidget(self.table)
+
         main_layout.addLayout(right_layout, stretch=2)
         self.setLayout(main_layout)
 
@@ -381,16 +386,17 @@ class CombatTab(QWidget):
                 item = QTableWidgetItem(str(c.get(key, "")))
                 item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
                 self.table.setItem(row, col, item)
+
+            # Actions button
             actions_btn = QPushButton("Actions")
             actions_btn.clicked.connect(lambda _, r=row: self.open_actions_dialog(r))
             self.table.setCellWidget(row, 11, actions_btn)
-            dmg_btn = QPushButton("Deal Damage")
-            dmg_btn.clicked.connect(lambda _, r=row: self.deal_damage_dialog(r))
-            self.table.setCellWidget(row, 12, dmg_btn)
+
+            # Remove button (only active if HP == 0)
             rm_btn = QPushButton("Remove")
             rm_btn.setEnabled(int(c.get("HP", 0)) == 0)
             rm_btn.clicked.connect(lambda _, r=row: self.remove_combatant(r))
-            self.table.setCellWidget(row, 13, rm_btn)
+            self.table.setCellWidget(row, 12, rm_btn)
 
     def open_actions_dialog(self, row):
         dlg = ActionDialog(
@@ -401,21 +407,6 @@ class CombatTab(QWidget):
             self,
         )
         if dlg.exec_():
-            self.refresh_table()
-
-    def deal_damage_dialog(self, row):
-        c = self.combatants[row]
-        dmg, ok = QInputDialog.getInt(
-            self, "Deal Damage", f"Damage to {c['Name']}?", 0, 0, 999
-        )
-        if ok and dmg > 0:
-            hp_before = int(c.get("HP", 0))
-            c["HP"] = max(0, hp_before - dmg)
-            self.log_message(
-                f"{c['Name']} takes {dmg} damage. HP: {hp_before} → {c['HP']}."
-            )
-            if hp_before > 0 and c["HP"] == 0:
-                self.log_message(f"{c['Name']} has fallen!")
             self.refresh_table()
 
     def remove_combatant(self, row):
