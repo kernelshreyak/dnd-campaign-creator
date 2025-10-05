@@ -1,8 +1,9 @@
 from PyQt5.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QListWidget, QPushButton, QMessageBox, QLabel, QListWidgetItem
+    QWidget, QHBoxLayout, QVBoxLayout, QListWidget, QPushButton, QMessageBox, QLabel, QListWidgetItem, QApplication, QInputDialog, QTableWidgetItem, QLineEdit
 )
 from gui.npc_editor import NPCEditor
 from utils.file_io import load_entities, save_entity
+import json
 
 class NPCTab(QWidget):
     def __init__(self, main_window):
@@ -17,13 +18,81 @@ class NPCTab(QWidget):
         self.add_btn.clicked.connect(self.new_npc)
         left_layout.addWidget(QLabel("NPCs"))
         left_layout.addWidget(self.add_btn)
+        # Add Delete button for NPCs
+        self.delete_btn = QPushButton("Delete")
+        self.delete_btn.setToolTip("Delete Selected NPC")
+        self.delete_btn.clicked.connect(self.delete_npc)
+        left_layout.addWidget(self.delete_btn)
         left_layout.addWidget(self.list_widget)
-        layout.addLayout(left_layout)
+        layout.addLayout(left_layout, stretch=1)
 
+        # Only add the editor widget to the right side of the main layout
         self.editor = NPCEditor()
-        self.editor.save_btn.clicked.disconnect()
         self.editor.save_btn.clicked.connect(self.save_npc)
-        layout.addWidget(self.editor)
+        layout.addWidget(self.editor, stretch=2)
+
+        # Add "Copy Action as String" button below the actions table
+
+        self.copy_action_btn = QPushButton("Copy Action as String")
+        def copy_selected_action():
+            row = self.editor.actions_table.currentRow()
+            if row < 0:
+                QMessageBox.warning(self, "No Action Selected", "Please select an action row to copy.")
+                return
+            action = {
+                "name": self.editor.actions_table.item(row, 0).text() if self.editor.actions_table.item(row, 0) else "",
+                "type": self.editor.actions_table.item(row, 1).text() if self.editor.actions_table.item(row, 1) else "",
+                "attack_bonus": self.editor.actions_table.item(row, 2).text() if self.editor.actions_table.item(row, 2) else "",
+                "damage": self.editor.actions_table.item(row, 3).text() if self.editor.actions_table.item(row, 3) else "",
+                "damage_type": self.editor.actions_table.item(row, 4).text() if self.editor.actions_table.item(row, 4) else "",
+                "description": self.editor.actions_table.item(row, 5).text() if self.editor.actions_table.item(row, 5) else "",
+            }
+            clipboard = QApplication.clipboard()
+            clipboard.setText(json.dumps(action, indent=2))
+            QMessageBox.information(self, "Copied", "Selected action copied to clipboard as JSON.")
+        self.copy_action_btn.clicked.connect(copy_selected_action)
+        self.editor.layout().addWidget(self.copy_action_btn)
+
+        # Add AI Action Generation input and button
+        ai_action_layout = QHBoxLayout()
+        self.ai_action_edit = QLineEdit()
+        self.ai_action_edit.setPlaceholderText("Describe the action to generate (e.g. 'fireball attack')")
+        self.ai_action_btn = QPushButton("Generate Action with AI")
+        def generate_action_with_ai():
+            import openai
+            desc = self.ai_action_edit.text().strip()
+            if not desc:
+                QMessageBox.warning(self, "No Description", "Please enter a description for the action.")
+                return
+            prompt = (
+                "You are an expert D&D 5e action generator. "
+                "Generate a single action as a JSON object with fields: "
+                "name, type, attack_bonus, damage, damage_type, description. "
+                f"Description: {desc}\n"
+                "Output only the JSON object."
+            )
+            try:
+                response = openai.chat.completions.create(
+                    model="gpt-4.1-mini",
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=300,
+                    temperature=0.7,
+                    response_format={"type": "json_object"}
+                )
+                import json as pyjson
+                content = response.choices[0].message.content
+                action = pyjson.loads(content)
+                row = self.editor.actions_table.rowCount()
+                self.editor.actions_table.insertRow(row)
+                for col, key in enumerate(["name", "type", "attack_bonus", "damage", "damage_type", "description"]):
+                    self.editor.actions_table.setItem(row, col, QTableWidgetItem(str(action.get(key, ""))))
+                QMessageBox.information(self, "AI Generated", "Action generated and added to table.")
+            except Exception as e:
+                QMessageBox.critical(self, "AI Error", f"Failed to generate action with AI:\n{e}")
+        self.ai_action_btn.clicked.connect(generate_action_with_ai)
+        ai_action_layout.addWidget(self.ai_action_edit)
+        ai_action_layout.addWidget(self.ai_action_btn)
+        self.editor.layout().addLayout(ai_action_layout)
 
         self.setLayout(layout)
         self.list_widget.itemClicked.connect(self.load_npc)
@@ -31,6 +100,59 @@ class NPCTab(QWidget):
         self.npcs = []
         self.selected_index = None
         self.refresh_list()
+
+    def delete_npc(self):
+        selected = self.list_widget.currentRow()
+        if selected < 0:
+            QMessageBox.warning(self, "Delete NPC", "No NPC selected.")
+            return
+        npc = self.npcs[selected]
+        name = npc.get("Name", "Unnamed")
+        reply = QMessageBox.question(
+            self, "Delete NPC",
+            f"Are you sure you want to delete '{name}'?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            # Remove from npcs.json
+            folder = self.main_window.campaign_folder
+            if folder:
+                import os, json
+                json_path = os.path.join(folder, "npcs.json")
+                if os.path.exists(json_path):
+                    with open(json_path, "r") as f:
+                        npcs = json.load(f)
+                    # Remove first entry with matching name
+                    for i, c in enumerate(npcs):
+                        if c.get("Name", "") == name:
+                            del npcs[i]
+                            break
+                    with open(json_path, "w") as f:
+                        json.dump(npcs, f, indent=2)
+            # Remove from UI
+            self.refresh_list()
+            self.editor.name_edit.clear()
+            self.editor.type_combo.setCurrentIndex(0)
+            self.editor.role_edit.clear()
+            self.editor.ac_edit.clear()
+            self.editor.hp_edit.clear()
+            self.editor.initiative_edit.clear()
+            self.editor.speed_edit.clear()
+            self.editor.str_edit.clear()
+            self.editor.dex_edit.clear()
+            self.editor.con_edit.clear()
+            self.editor.int_edit.clear()
+            self.editor.wis_edit.clear()
+            self.editor.cha_edit.clear()
+            self.editor.skills_edit.clear()
+            self.editor.gear_edit.clear()
+            self.editor.senses_edit.clear()
+            self.editor.languages_edit.clear()
+            self.editor.cr_edit.clear()
+            self.editor.habitat_edit.clear()
+            self.editor.desc_edit.clear()
+            self.editor.clear_actions()
+            self.editor.stat_block_edit.clear()
 
     def refresh_list(self):
         folder = self.main_window.campaign_folder
@@ -62,7 +184,7 @@ class NPCTab(QWidget):
         self.editor.cr_edit.clear()
         self.editor.habitat_edit.clear()
         self.editor.desc_edit.clear()
-        self.editor.actions_edit.clear()
+        self.editor.clear_actions()
         self.editor.stat_block_edit.clear()
 
     def load_npc(self, item):
@@ -90,7 +212,7 @@ class NPCTab(QWidget):
         self.editor.habitat_edit.setText(npc.get("Habitat", ""))
         self.editor.desc_edit.setPlainText(npc.get("Description", ""))
         actions = npc.get("Actions", [])
-        self.editor.actions_edit.setPlainText("\n".join([f"{a['name']}; {a['desc']}" for a in actions]))
+        self.editor.set_actions(actions)
         self.editor.stat_block_edit.clear()
 
     def save_npc(self):
@@ -119,13 +241,18 @@ class NPCTab(QWidget):
         if missing:
             QMessageBox.warning(self, "Missing Fields", f"Please fill in all mandatory fields: {', '.join(missing)}")
             return
+        # Collect actions from the actions_table
         actions = []
-        for line in self.editor.actions_edit.toPlainText().splitlines():
-            if ";" in line:
-                name, desc = line.split(";", 1)
-                actions.append({"name": name.strip(), "desc": desc.strip()})
-            elif line.strip():
-                actions.append({"name": line.strip(), "desc": ""})
+        for row in range(self.editor.actions_table.rowCount()):
+            action = {
+                "name": self.editor.actions_table.item(row, 0).text() if self.editor.actions_table.item(row, 0) else "",
+                "type": self.editor.actions_table.item(row, 1).text() if self.editor.actions_table.item(row, 1) else "",
+                "attack_bonus": self.editor.actions_table.item(row, 2).text() if self.editor.actions_table.item(row, 2) else "",
+                "damage": self.editor.actions_table.item(row, 3).text() if self.editor.actions_table.item(row, 3) else "",
+                "damage_type": self.editor.actions_table.item(row, 4).text() if self.editor.actions_table.item(row, 4) else "",
+                "description": self.editor.actions_table.item(row, 5).text() if self.editor.actions_table.item(row, 5) else "",
+            }
+            actions.append(action)
         npc_data = {
             "Name": self.editor.name_edit.text().strip(),
             "Type": self.editor.type_combo.currentText(),
@@ -153,6 +280,53 @@ class NPCTab(QWidget):
         if not folder:
             QMessageBox.warning(self, "No Campaign", "Please create or load a campaign first.")
             return
-        save_entity("npcs", npc_data, folder)
-        QMessageBox.information(self, "Saved", "NPC saved.")
+        # Override NPC with same name if exists
+        import os, json
+        json_path = os.path.join(folder, "npcs.json")
+        npcs = []
+        if os.path.exists(json_path):
+            with open(json_path, "r") as f:
+                try:
+                    npcs = json.load(f)
+                except Exception:
+                    npcs = []
+        # Remove any NPC with the same name
+        npcs = [c for c in npcs if c.get("Name", "") != npc_data["Name"]]
+        npcs.append(npc_data)
+        with open(json_path, "w") as f:
+            json.dump(npcs, f, indent=2)
+        QMessageBox.information(self, "Saved", "NPC saved (overwritten if name existed).")
         self.refresh_list()
+    def copy_action_string(self):
+        import json
+        actions = []
+        for row in range(self.editor.actions_table.rowCount()):
+            action = {
+                "name": self.editor.actions_table.item(row, 0).text() if self.editor.actions_table.item(row, 0) else "",
+                "type": self.editor.actions_table.item(row, 1).text() if self.editor.actions_table.item(row, 1) else "",
+                "attack_bonus": self.editor.actions_table.item(row, 2).text() if self.editor.actions_table.item(row, 2) else "",
+                "damage": self.editor.actions_table.item(row, 3).text() if self.editor.actions_table.item(row, 3) else "",
+                "damage_type": self.editor.actions_table.item(row, 4).text() if self.editor.actions_table.item(row, 4) else "",
+                "description": self.editor.actions_table.item(row, 5).text() if self.editor.actions_table.item(row, 5) else "",
+            }
+            actions.append(action)
+        action_string = json.dumps(actions, indent=2)
+        clipboard = QApplication.clipboard()
+        clipboard.setText(action_string)
+        QMessageBox.information(self, "Copied", "Action copied to clipboard as JSON string.")
+
+    def import_action_string(self):
+        import json
+        action_string, ok = QInputDialog.getText(self, "Import Action", "Paste action JSON string:")
+        if ok and action_string:
+            try:
+                actions = json.loads(action_string)
+                self.editor.actions_table.setRowCount(0)
+                for action in actions:
+                    row = self.editor.actions_table.rowCount()
+                    self.editor.actions_table.insertRow(row)
+                    for col, key in enumerate(["name", "type", "attack_bonus", "damage", "damage_type", "description"]):
+                        self.editor.actions_table.setItem(row, col, QTableWidgetItem(str(action.get(key, ""))))
+                QMessageBox.information(self, "Imported", "Actions imported from JSON string.")
+            except json.JSONDecodeError:
+                QMessageBox.critical(self, "Error", "Invalid JSON string.")

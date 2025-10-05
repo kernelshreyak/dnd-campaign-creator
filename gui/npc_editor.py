@@ -1,19 +1,74 @@
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QLineEdit, QTextEdit, QFormLayout, QPushButton, QMessageBox, QComboBox, QHBoxLayout
+    QWidget, QVBoxLayout, QLabel, QLineEdit, QTextEdit, QFormLayout, QPushButton, QMessageBox, QComboBox, QHBoxLayout,
+    QTableWidget, QTableWidgetItem, QHeaderView, QDialog, QDialogButtonBox, QGridLayout
 )
 import re
+import os
+import openai
+import json
+
+class ActionDialog(QDialog):
+    def __init__(self, action=None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Edit Action" if action else "Add Action")
+        layout = QGridLayout()
+        self.name_edit = QLineEdit()
+        self.type_edit = QLineEdit()
+        self.attack_bonus_edit = QLineEdit()
+        self.damage_edit = QLineEdit()
+        self.damage_type_edit = QLineEdit()
+        self.desc_edit = QTextEdit()
+        layout.addWidget(QLabel("Name:"), 0, 0)
+        layout.addWidget(self.name_edit, 0, 1)
+        layout.addWidget(QLabel("Type:"), 1, 0)
+        layout.addWidget(self.type_edit, 1, 1)
+        layout.addWidget(QLabel("Attack Bonus:"), 2, 0)
+        layout.addWidget(self.attack_bonus_edit, 2, 1)
+        layout.addWidget(QLabel("Damage:"), 3, 0)
+        layout.addWidget(self.damage_edit, 3, 1)
+        layout.addWidget(QLabel("Damage Type:"), 4, 0)
+        layout.addWidget(self.damage_type_edit, 4, 1)
+        layout.addWidget(QLabel("Description:"), 5, 0)
+        layout.addWidget(self.desc_edit, 5, 1)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        layout.addWidget(self.buttons, 6, 0, 1, 2)
+        self.setLayout(layout)
+        if action:
+            self.name_edit.setText(action.get("name", ""))
+            self.type_edit.setText(action.get("type", ""))
+            self.attack_bonus_edit.setText(str(action.get("attack_bonus", "")))
+            self.damage_edit.setText(str(action.get("damage", "")))
+            self.damage_type_edit.setText(action.get("damage_type", ""))
+            self.desc_edit.setPlainText(action.get("description", ""))
+
+    def get_action(self):
+        return {
+            "name": self.name_edit.text().strip(),
+            "type": self.type_edit.text().strip(),
+            "attack_bonus": self.attack_bonus_edit.text().strip(),
+            "damage": self.damage_edit.text().strip(),
+            "damage_type": self.damage_type_edit.text().strip(),
+            "description": self.desc_edit.toPlainText().strip(),
+        }
 
 class NPCEditor(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout()
 
+        # OpenAI API key input (optional, fallback to env var)
+        self.api_key_edit = QLineEdit()
+        self.api_key_edit.setPlaceholderText("OpenAI API Key (or set OPENAI_API_KEY env var)")
+        layout.addWidget(self.api_key_edit)
+
         # Stat block input
         layout.addWidget(QLabel("Paste NPC/Monster Stat Block:"))
         self.stat_block_edit = QTextEdit()
         layout.addWidget(self.stat_block_edit)
 
-        self.parse_btn = QPushButton("Parse Stat Block")
+        self.parse_btn = QPushButton("Parse Stat Block (AI)")
         self.parse_btn.clicked.connect(self.parse_stat_block)
         layout.addWidget(self.parse_btn)
 
@@ -62,10 +117,25 @@ class NPCEditor(QWidget):
         self.form.addRow("Description:", self.desc_edit)
         layout.addLayout(self.form)
 
-        # Actions section
-        layout.addWidget(QLabel("Actions (one per line, or use ; to separate name and description):"))
-        self.actions_edit = QTextEdit()
-        layout.addWidget(self.actions_edit)
+        # Actions section as table
+        layout.addWidget(QLabel("Actions:"))
+        self.actions_table = QTableWidget(0, 6)
+        self.actions_table.setHorizontalHeaderLabels(["Name", "Type", "Attack Bonus", "Damage", "Damage Type", "Description"])
+        self.actions_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        layout.addWidget(self.actions_table)
+
+        actions_btn_layout = QHBoxLayout()
+        self.add_action_btn = QPushButton("Add Action")
+        self.edit_action_btn = QPushButton("Edit Action")
+        self.remove_action_btn = QPushButton("Remove Action")
+        actions_btn_layout.addWidget(self.add_action_btn)
+        actions_btn_layout.addWidget(self.edit_action_btn)
+        actions_btn_layout.addWidget(self.remove_action_btn)
+        layout.addLayout(actions_btn_layout)
+
+        self.add_action_btn.clicked.connect(self.add_action)
+        self.edit_action_btn.clicked.connect(self.edit_action)
+        self.remove_action_btn.clicked.connect(self.remove_action)
 
         # Save button
         self.save_btn = QPushButton("Save NPC")
@@ -74,59 +144,137 @@ class NPCEditor(QWidget):
 
         self.setLayout(layout)
 
+    def set_actions(self, actions):
+        """Set the actions table from a list of action dicts."""
+        self.actions_table.setRowCount(0)
+        for action in actions:
+            row = self.actions_table.rowCount()
+            self.actions_table.insertRow(row)
+            for col, key in enumerate(["name", "type", "attack_bonus", "damage", "damage_type", "description"]):
+                self.actions_table.setItem(row, col, QTableWidgetItem(str(action.get(key, ""))))
+
+    def clear_actions(self):
+        self.actions_table.setRowCount(0)
+
+    def add_action(self):
+        dialog = ActionDialog(parent=self)
+        if dialog.exec_():
+            action = dialog.get_action()
+            row = self.actions_table.rowCount()
+            self.actions_table.insertRow(row)
+            for col, key in enumerate(["name", "type", "attack_bonus", "damage", "damage_type", "description"]):
+                self.actions_table.setItem(row, col, QTableWidgetItem(action[key]))
+
+    def edit_action(self):
+        row = self.actions_table.currentRow()
+        if row < 0:
+            QMessageBox.warning(self, "No Selection", "Select an action to edit.")
+            return
+        action = {key: self.actions_table.item(row, col).text() if self.actions_table.item(row, col) else "" for col, key in enumerate(["name", "type", "attack_bonus", "damage", "damage_type", "description"])}
+        dialog = ActionDialog(action, parent=self)
+        if dialog.exec_():
+            action = dialog.get_action()
+            for col, key in enumerate(["name", "type", "attack_bonus", "damage", "damage_type", "description"]):
+                self.actions_table.setItem(row, col, QTableWidgetItem(action[key]))
+
+    def remove_action(self):
+        row = self.actions_table.currentRow()
+        if row >= 0:
+            self.actions_table.removeRow(row)
+
     def parse_stat_block(self):
         text = self.stat_block_edit.toPlainText()
-        # Placeholder AI parsing logic (regexes for demo, not robust)
-        self.name_edit.setText("Parsed NPC")
-        self.role_edit.setText("")
-        self.ac_edit.setText(self._find_regex(r"AC (\d+)", text))
-        self.hp_edit.setText(self._find_regex(r"HP (\d+)", text))
-        self.initiative_edit.setText(self._find_regex(r"Initiative ([+\-\d]+)", text))
-        self.speed_edit.setText(self._find_regex(r"Speed ([\d ]+ft\.)", text))
-        self.str_edit.setText(self._find_stat("Str", text))
-        self.dex_edit.setText(self._find_stat("Dex", text))
-        self.con_edit.setText(self._find_stat("Con", text))
-        self.int_edit.setText(self._find_stat("Int", text))
-        self.wis_edit.setText(self._find_stat("Wis", text))
-        self.cha_edit.setText(self._find_stat("Cha", text))
-        self.skills_edit.setText(self._find_regex(r"Skills ([^\n]+)", text))
-        self.gear_edit.setText(self._find_regex(r"Gear ([^\n]+)", text))
-        self.senses_edit.setText(self._find_regex(r"Senses ([^\n]+)", text))
-        self.languages_edit.setText(self._find_regex(r"Languages ([^\n]+)", text))
-        self.cr_edit.setText(self._find_regex(r"CR ([^\n]+)", text))
-        self.habitat_edit.setText(self._find_regex(r"Habitat: ([^\n]+)", text))
-        self.desc_edit.setPlainText("")
-        # Actions
-        actions = self._extract_actions(text)
-        self.actions_edit.setPlainText("\n".join([f"{a['name']}; {a['desc']}" for a in actions]))
-        # Set type based on stat block (very basic)
-        if "hostile" in text.lower():
-            self.type_combo.setCurrentText("Hostile")
-        elif "friendly" in text.lower():
-            self.type_combo.setCurrentText("Friendly")
+        api_key = self.api_key_edit.text().strip() or os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            QMessageBox.warning(self, "API Key Required", "Please enter your OpenAI API key or set the OPENAI_API_KEY environment variable.")
+            return
+
+        prompt = (
+            "You are an expert D&D 5e NPC stat block parser. "
+            "Given a pasted stat block, output a JSON object with all fields filled, auto-generating any missing content. "
+            "Actions must be a list of objects with fields: name, type (attack, ability, etc.), attack_bonus, damage, damage_type, description. "
+            "Fill all fields for automation. Example output:\n"
+            "{\n"
+            "  \"Name\": \"Veteran\",\n"
+            "  \"Type\": \"Hostile\",\n"
+            "  \"Role/Title\": \"Mercenary\",\n"
+            "  \"AC\": 17,\n"
+            "  \"HP\": 58,\n"
+            "  \"Initiative\": 1,\n"
+            "  \"Speed\": \"30 ft.\",\n"
+            "  \"STR\": 16,\n"
+            "  \"DEX\": 13,\n"
+            "  \"CON\": 14,\n"
+            "  \"INT\": 10,\n"
+            "  \"WIS\": 11,\n"
+            "  \"CHA\": 10,\n"
+            "  \"Skills\": \"Athletics +5, Perception +2\",\n"
+            "  \"Gear\": \"Heavy Crossbow, Longsword, Shortsword\",\n"
+            "  \"Senses\": \"Passive Perception 12\",\n"
+            "  \"Languages\": \"Any one language (usually Common)\",\n"
+            "  \"CR\": \"3 (XP 700; PB +2)\",\n"
+            "  \"Habitat\": \"Urban\",\n"
+            "  \"Description\": \"A grizzled mercenary veteran.\",\n"
+            "  \"Actions\": [\n"
+            "    {\"name\": \"Multiattack\", \"type\": \"ability\", \"attack_bonus\": null, \"damage\": null, \"damage_type\": null, \"description\": \"The veteran makes two longsword attacks. If it has a shortsword drawn, it can also make a shortsword attack.\"},\n"
+            "    {\"name\": \"Longsword\", \"type\": \"attack\", \"attack_bonus\": 5, \"damage\": \"1d8+3\", \"damage_type\": \"slashing\", \"description\": \"Melee Weapon Attack: +5 to hit, reach 5 ft., one target. Hit: 7 (1d8 + 3) slashing damage, or 8 (1d10 + 3) slashing damage if used with two hands.\"}\n"
+            "  ]\n"
+            "}\n"
+            "Stat block:\n"
+            f"{text}\n"
+            "Output JSON only."
+        )
+
+        try:
+            openai.api_key = api_key
+            response = openai.chat.completions.create(
+                model="gpt-4.1-mini",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1200,
+                temperature=0.2,
+                response_format={"type": "json_object"}
+            )
+            content = response.choices[0].message.content
+            npc_data = json.loads(content)
+        except Exception as e:
+            QMessageBox.critical(self, "OpenAI Error", f"Failed to parse stat block with OpenAI:\n{e}")
+            return
+
+        # Fill fields from AI response
+        self.name_edit.setText(str(npc_data.get("Name", "")))
+        self.role_edit.setText(str(npc_data.get("Role/Title", "")))
+        self.ac_edit.setText(str(npc_data.get("AC", "")))
+        self.hp_edit.setText(str(npc_data.get("HP", "")))
+        self.initiative_edit.setText(str(npc_data.get("Initiative", "")))
+        self.speed_edit.setText(str(npc_data.get("Speed", "")))
+        self.str_edit.setText(str(npc_data.get("STR", "")))
+        self.dex_edit.setText(str(npc_data.get("DEX", "")))
+        self.con_edit.setText(str(npc_data.get("CON", "")))
+        self.int_edit.setText(str(npc_data.get("INT", "")))
+        self.wis_edit.setText(str(npc_data.get("WIS", "")))
+        self.cha_edit.setText(str(npc_data.get("CHA", "")))
+        self.skills_edit.setText(str(npc_data.get("Skills", "")))
+        self.gear_edit.setText(str(npc_data.get("Gear", "")))
+        self.senses_edit.setText(str(npc_data.get("Senses", "")))
+        self.languages_edit.setText(str(npc_data.get("Languages", "")))
+        self.cr_edit.setText(str(npc_data.get("CR", "")))
+        self.habitat_edit.setText(str(npc_data.get("Habitat", "")))
+        self.desc_edit.setPlainText(str(npc_data.get("Description", "")))
+        # Set type
+        t = str(npc_data.get("Type", "Neutral"))
+        if t in ["Hostile", "Friendly", "Neutral"]:
+            self.type_combo.setCurrentText(t)
         else:
             self.type_combo.setCurrentText("Neutral")
-        QMessageBox.information(self, "Parsed", "Stat block parsed (basic demo). Please review and complete all fields.")
-
-    def _find_regex(self, pattern, text):
-        m = re.search(pattern, text, re.IGNORECASE)
-        return m.group(1).strip() if m else ""
-
-    def _find_stat(self, stat, text):
-        # Looks for stat name followed by value, e.g. "Str\n16"
-        m = re.search(rf"{stat}\s*\n\s*(\d+)", text, re.IGNORECASE)
-        return m.group(1).strip() if m else ""
-
-    def _extract_actions(self, text):
-        # Extracts actions section (very basic, demo only)
-        actions = []
-        if "Actions" in text:
-            actions_text = text.split("Actions", 1)[1]
-            for line in actions_text.splitlines():
-                if "." in line:
-                    name, desc = line.split(".", 1)
-                    actions.append({"name": name.strip(), "desc": desc.strip()})
-        return actions
+        # Actions
+        self.actions_table.setRowCount(0)
+        actions = npc_data.get("Actions", [])
+        for action in actions:
+            row = self.actions_table.rowCount()
+            self.actions_table.insertRow(row)
+            for col, key in enumerate(["name", "type", "attack_bonus", "damage", "damage_type", "description"]):
+                self.actions_table.setItem(row, col, QTableWidgetItem(str(action.get(key, ""))))
+        QMessageBox.information(self, "Parsed", "Stat block parsed using OpenAI. Please review and complete all fields.")
 
     def save_npc(self):
         # Validate all fields
@@ -154,13 +302,17 @@ class NPCEditor(QWidget):
         if missing:
             QMessageBox.warning(self, "Missing Fields", f"Please fill in all mandatory fields: {', '.join(missing)}")
             return
-        # Actions can be empty, but we collect them
+        # Collect actions from table
         actions = []
-        for line in self.actions_edit.toPlainText().splitlines():
-            if ";" in line:
-                name, desc = line.split(";", 1)
-                actions.append({"name": name.strip(), "desc": desc.strip()})
-            elif line.strip():
-                actions.append({"name": line.strip(), "desc": ""})
+        for row in range(self.actions_table.rowCount()):
+            action = {
+                "name": self.actions_table.item(row, 0).text() if self.actions_table.item(row, 0) else "",
+                "type": self.actions_table.item(row, 1).text() if self.actions_table.item(row, 1) else "",
+                "attack_bonus": self.actions_table.item(row, 2).text() if self.actions_table.item(row, 2) else "",
+                "damage": self.actions_table.item(row, 3).text() if self.actions_table.item(row, 3) else "",
+                "damage_type": self.actions_table.item(row, 4).text() if self.actions_table.item(row, 4) else "",
+                "description": self.actions_table.item(row, 5).text() if self.actions_table.item(row, 5) else "",
+            }
+            actions.append(action)
         # Placeholder: Save logic would go here
         QMessageBox.information(self, "Saved", "NPC saved (placeholder).")

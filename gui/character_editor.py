@@ -1,7 +1,54 @@
 import random
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QPushButton, QLineEdit, QFormLayout, QMessageBox, QTextEdit, QHBoxLayout
+    QWidget, QVBoxLayout, QLabel, QPushButton, QLineEdit, QFormLayout, QMessageBox, QHBoxLayout,
+    QTableWidget, QTableWidgetItem, QHeaderView, QDialog, QDialogButtonBox, QGridLayout, QTextEdit
 )
+
+class ActionDialog(QDialog):
+    def __init__(self, action=None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Edit Action" if action else "Add Action")
+        layout = QGridLayout()
+        self.name_edit = QLineEdit()
+        self.type_edit = QLineEdit()
+        self.attack_bonus_edit = QLineEdit()
+        self.damage_edit = QLineEdit()
+        self.damage_type_edit = QLineEdit()
+        self.desc_edit = QTextEdit()
+        layout.addWidget(QLabel("Name:"), 0, 0)
+        layout.addWidget(self.name_edit, 0, 1)
+        layout.addWidget(QLabel("Type:"), 1, 0)
+        layout.addWidget(self.type_edit, 1, 1)
+        layout.addWidget(QLabel("Attack Bonus:"), 2, 0)
+        layout.addWidget(self.attack_bonus_edit, 2, 1)
+        layout.addWidget(QLabel("Damage:"), 3, 0)
+        layout.addWidget(self.damage_edit, 3, 1)
+        layout.addWidget(QLabel("Damage Type:"), 4, 0)
+        layout.addWidget(self.damage_type_edit, 4, 1)
+        layout.addWidget(QLabel("Description:"), 5, 0)
+        layout.addWidget(self.desc_edit, 5, 1)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        layout.addWidget(self.buttons, 6, 0, 1, 2)
+        self.setLayout(layout)
+        if action:
+            self.name_edit.setText(action.get("name", ""))
+            self.type_edit.setText(action.get("type", ""))
+            self.attack_bonus_edit.setText(str(action.get("attack_bonus", "")))
+            self.damage_edit.setText(str(action.get("damage", "")))
+            self.damage_type_edit.setText(action.get("damage_type", ""))
+            self.desc_edit.setPlainText(action.get("description", ""))
+
+    def get_action(self):
+        return {
+            "name": self.name_edit.text().strip(),
+            "type": self.type_edit.text().strip(),
+            "attack_bonus": self.attack_bonus_edit.text().strip(),
+            "damage": self.damage_edit.text().strip(),
+            "damage_type": self.damage_type_edit.text().strip(),
+            "description": self.desc_edit.toPlainText().strip(),
+        }
 
 class CharacterEditor(QWidget):
     def __init__(self, parent=None):
@@ -46,10 +93,25 @@ class CharacterEditor(QWidget):
         roll_layout.addWidget(self.roll_btn)
         layout.addLayout(roll_layout)
 
-        # Actions section
-        layout.addWidget(QLabel("Actions (one per line, or use ; to separate name and description):"))
-        self.actions_edit = QTextEdit()
-        layout.addWidget(self.actions_edit)
+        # Actions section as table
+        layout.addWidget(QLabel("Actions:"))
+        self.actions_table = QTableWidget(0, 6)
+        self.actions_table.setHorizontalHeaderLabels(["Name", "Type", "Attack Bonus", "Damage", "Damage Type", "Description"])
+        self.actions_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        layout.addWidget(self.actions_table)
+
+        actions_btn_layout = QHBoxLayout()
+        self.add_action_btn = QPushButton("Add Action")
+        self.edit_action_btn = QPushButton("Edit Action")
+        self.remove_action_btn = QPushButton("Remove Action")
+        actions_btn_layout.addWidget(self.add_action_btn)
+        actions_btn_layout.addWidget(self.edit_action_btn)
+        actions_btn_layout.addWidget(self.remove_action_btn)
+        layout.addLayout(actions_btn_layout)
+
+        self.add_action_btn.clicked.connect(self.add_action)
+        self.edit_action_btn.clicked.connect(self.edit_action)
+        self.remove_action_btn.clicked.connect(self.remove_action)
 
         # Save button
         self.save_btn = QPushButton("Save Character")
@@ -57,6 +119,32 @@ class CharacterEditor(QWidget):
         layout.addWidget(self.save_btn)
 
         self.setLayout(layout)
+
+    def add_action(self):
+        dialog = ActionDialog(parent=self)
+        if dialog.exec_():
+            action = dialog.get_action()
+            row = self.actions_table.rowCount()
+            self.actions_table.insertRow(row)
+            for col, key in enumerate(["name", "type", "attack_bonus", "damage", "damage_type", "description"]):
+                self.actions_table.setItem(row, col, QTableWidgetItem(action[key]))
+
+    def edit_action(self):
+        row = self.actions_table.currentRow()
+        if row < 0:
+            QMessageBox.warning(self, "No Selection", "Select an action to edit.")
+            return
+        action = {key: self.actions_table.item(row, col).text() if self.actions_table.item(row, col) else "" for col, key in enumerate(["name", "type", "attack_bonus", "damage", "damage_type", "description"])}
+        dialog = ActionDialog(action, parent=self)
+        if dialog.exec_():
+            action = dialog.get_action()
+            for col, key in enumerate(["name", "type", "attack_bonus", "damage", "damage_type", "description"]):
+                self.actions_table.setItem(row, col, QTableWidgetItem(action[key]))
+
+    def remove_action(self):
+        row = self.actions_table.currentRow()
+        if row >= 0:
+            self.actions_table.removeRow(row)
 
     def roll_stats(self):
         stats = [self.roll_4d6_drop_lowest() for _ in range(6)]
@@ -92,13 +180,17 @@ class CharacterEditor(QWidget):
         if missing:
             QMessageBox.warning(self, "Missing Fields", f"Please fill in all mandatory fields: {', '.join(missing)}")
             return
-        # Actions can be empty, but we collect them
+        # Collect actions from table
         actions = []
-        for line in self.actions_edit.toPlainText().splitlines():
-            if ";" in line:
-                name, desc = line.split(";", 1)
-                actions.append({"name": name.strip(), "desc": desc.strip()})
-            elif line.strip():
-                actions.append({"name": line.strip(), "desc": ""})
+        for row in range(self.actions_table.rowCount()):
+            action = {
+                "name": self.actions_table.item(row, 0).text() if self.actions_table.item(row, 0) else "",
+                "type": self.actions_table.item(row, 1).text() if self.actions_table.item(row, 1) else "",
+                "attack_bonus": self.actions_table.item(row, 2).text() if self.actions_table.item(row, 2) else "",
+                "damage": self.actions_table.item(row, 3).text() if self.actions_table.item(row, 3) else "",
+                "damage_type": self.actions_table.item(row, 4).text() if self.actions_table.item(row, 4) else "",
+                "description": self.actions_table.item(row, 5).text() if self.actions_table.item(row, 5) else "",
+            }
+            actions.append(action)
         # Placeholder: Save logic would go here
         QMessageBox.information(self, "Saved", "Character saved (placeholder).")

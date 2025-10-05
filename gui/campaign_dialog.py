@@ -50,7 +50,8 @@ class CampaignDialog(QDialog):
         self.setLayout(layout)
 
     def choose_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Campaign Folder")
+        default_dir = os.path.expanduser('~/DnD_Campaigns/')
+        folder = QFileDialog.getExistingDirectory(self, "Select Campaign Folder", default_dir)
         if folder:
             self.folder_edit.setText(folder)
 
@@ -71,7 +72,8 @@ class CampaignDialog(QDialog):
         self.accept()
 
     def load_campaign(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Existing Campaign Folder")
+        default_dir = os.path.expanduser('~/DnD_Campaigns/')
+        folder = QFileDialog.getExistingDirectory(self, "Select Existing Campaign Folder", default_dir)
         if folder:
             self.campaign_name = os.path.basename(folder)
             self.campaign_folder = folder
