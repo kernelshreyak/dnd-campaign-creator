@@ -15,6 +15,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self._make_characters_tab(), "Characters")
         self.tabs.addTab(self._make_npcs_tab(), "NPCs")
         self.tabs.addTab(self._make_notes_tab(), "Notes")
+        self.tabs.addTab(self._make_combat_tab(), "Combat")
 
         main_widget = QWidget()
         main_layout = QHBoxLayout()
@@ -62,6 +63,10 @@ class MainWindow(QMainWindow):
     def _make_notes_tab(self):
         from gui.notes_editor import NotesEditor
         return NotesEditor(main_window=self)
+
+    def _make_combat_tab(self):
+        from gui.combat_tab import CombatTab
+        return CombatTab(self)
 
     def open_campaign_dialog(self):
         from gui.campaign_dialog import CampaignDialog
