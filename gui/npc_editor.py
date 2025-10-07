@@ -109,6 +109,8 @@ class NPCEditor(QWidget):
 
         # NPC fields
         self.name_edit = QLineEdit()
+        self.token_edit = QLineEdit()
+        self.token_edit.setPlaceholderText("Image URL or local path")
         self.type_combo = QComboBox()
         self.type_combo.addItems(["Hostile", "Friendly", "Neutral"])
         self.role_edit = QLineEdit()
@@ -134,6 +136,7 @@ class NPCEditor(QWidget):
         self.immune_edit = QLineEdit()
 
         self.form.addRow("Name:", self.name_edit)
+        self.form.addRow("Token Image:", self.token_edit)
         self.form.addRow("Type:", self.type_combo)
         self.form.addRow("Role/Title:", self.role_edit)
         self.form.addRow("AC:", self.ac_edit)
@@ -270,6 +273,7 @@ class NPCEditor(QWidget):
                     "properties": {
                         "Name": {"type": "string"},
                         "Type": {"type": "string"},
+                        "TokenImage": {"type": "string"},
                         "Role/Title": {"type": "string"},
                         "AC": {"type": "string"},
                         "HP": {"type": "string"},
@@ -355,6 +359,7 @@ class NPCEditor(QWidget):
 
         # Fill fields from AI response
         self.name_edit.setText(str(npc_data.get("Name", "")))
+        self.token_edit.setText(str(npc_data.get("TokenImage", "")))
         self.role_edit.setText(str(npc_data.get("Role/Title", "")))
         self.ac_edit.setText(str(npc_data.get("AC", "")))
         self.hp_edit.setText(str(npc_data.get("HP", "")))
@@ -431,9 +436,10 @@ class NPCEditor(QWidget):
             }
             actions.append(action)
         # Collect resistances, vulnerabilities, immunities
+        token_image = self.token_edit.text().strip()
         resistances = self.resist_edit.text().strip()
         vulnerabilities = self.vuln_edit.text().strip()
         immunities = self.immune_edit.text().strip()
         # Placeholder: Save logic would go here, now includes new fields
-        # Example: npc_data = {..., "Resistances": resistances, "Vulnerabilities": vulnerabilities, "Immunities": immunities, ...}
+        # Example: npc_data = {..., "TokenImage": token_image, "Resistances": resistances, ...}
         QMessageBox.information(self, "Saved", "NPC saved (placeholder).")

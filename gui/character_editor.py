@@ -1,8 +1,25 @@
 import random
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QPushButton, QLineEdit, QFormLayout, QMessageBox, QHBoxLayout,
-    QTableWidget, QTableWidgetItem, QHeaderView, QDialog, QDialogButtonBox, QGridLayout, QTextEdit
+    QWidget,
+    QVBoxLayout,
+    QLabel,
+    QPushButton,
+    QLineEdit,
+    QFormLayout,
+    QMessageBox,
+    QHBoxLayout,
+    QTableWidget,
+    QTableWidgetItem,
+    QHeaderView,
+    QDialog,
+    QDialogButtonBox,
+    QGridLayout,
+    QTextEdit,
+    QSplitter,
+    QScrollArea,
+    QSizePolicy,
 )
+from PyQt5.QtCore import Qt
 
 class ActionDialog(QDialog):
     def __init__(self, action=None, parent=None):
@@ -53,11 +70,32 @@ class ActionDialog(QDialog):
 class CharacterEditor(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        layout = QVBoxLayout()
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        self.splitter = QSplitter(Qt.Vertical)
+        self.splitter.setChildrenCollapsible(False)
+
+        # --- Character form in scroll area ---
+        form_scroll = QScrollArea()
+        form_scroll.setWidgetResizable(True)
+
+        form_container = QWidget()
+        form_container_layout = QVBoxLayout(form_container)
+        form_container_layout.setContentsMargins(12, 12, 12, 12)
+        form_container_layout.setSpacing(10)
+
+        self.form = QFormLayout()
+        self.form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        self.form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.form.setFormAlignment(Qt.AlignTop | Qt.AlignLeft)
 
         # Character fields (main fields as per Fantasy Grounds)
-        self.form = QFormLayout()
         self.name_edit = QLineEdit()
+        self.token_edit = QLineEdit()
+        self.token_edit.setPlaceholderText("Image URL or local path")
         self.race_edit = QLineEdit()
         self.class_edit = QLineEdit()
         self.level_edit = QLineEdit()
@@ -72,6 +110,7 @@ class CharacterEditor(QWidget):
         self.wis_edit = QLineEdit()
         self.cha_edit = QLineEdit()
         self.form.addRow("Name:", self.name_edit)
+        self.form.addRow("Token Image:", self.token_edit)
         self.form.addRow("Race:", self.race_edit)
         self.form.addRow("Class:", self.class_edit)
         self.form.addRow("Level:", self.level_edit)
@@ -91,41 +130,68 @@ class CharacterEditor(QWidget):
         self.form.addRow("Resistances:", self.resist_edit)
         self.form.addRow("Vulnerabilities:", self.vuln_edit)
         self.form.addRow("Immunities:", self.immune_edit)
-        layout.addLayout(self.form)
 
-        # Roll stats button
+        form_container_layout.addLayout(self.form)
+
         roll_layout = QHBoxLayout()
+        roll_layout.setContentsMargins(0, 0, 0, 0)
         self.roll_btn = QPushButton("Roll Stats (4d6 drop lowest)")
         self.roll_btn.clicked.connect(self.roll_stats)
         roll_layout.addWidget(self.roll_btn)
-        layout.addLayout(roll_layout)
+        form_container_layout.addLayout(roll_layout)
+        form_container_layout.addStretch()
 
-        # Actions section as table
-        layout.addWidget(QLabel("Actions:"))
+        form_scroll.setWidget(form_container)
+        self.splitter.addWidget(form_scroll)
+
+        # --- Actions section ---
         self.actions_table = QTableWidget(0, 6)
         self.actions_table.setHorizontalHeaderLabels(["Name", "Type", "Attack Bonus", "Damage", "Damage Type", "Description"])
         self.actions_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        layout.addWidget(self.actions_table)
 
-        actions_btn_layout = QHBoxLayout()
         self.add_action_btn = QPushButton("Add Action")
         self.edit_action_btn = QPushButton("Edit Action")
         self.remove_action_btn = QPushButton("Remove Action")
+        self.save_btn = QPushButton("Save Character")
+        self.save_btn.clicked.connect(self.save_character)
+
+        actions_widget = QWidget()
+        actions_layout = QVBoxLayout(actions_widget)
+        actions_layout.setContentsMargins(0, 0, 0, 0)
+        actions_layout.setSpacing(8)
+        actions_layout.addWidget(QLabel("Actions:"))
+        actions_layout.addWidget(self.actions_table)
+
+        actions_btn_layout = QHBoxLayout()
         actions_btn_layout.addWidget(self.add_action_btn)
         actions_btn_layout.addWidget(self.edit_action_btn)
         actions_btn_layout.addWidget(self.remove_action_btn)
-        layout.addLayout(actions_btn_layout)
+        actions_layout.addLayout(actions_btn_layout)
 
         self.add_action_btn.clicked.connect(self.add_action)
         self.edit_action_btn.clicked.connect(self.edit_action)
         self.remove_action_btn.clicked.connect(self.remove_action)
 
-        # Save button
-        self.save_btn = QPushButton("Save Character")
-        self.save_btn.clicked.connect(self.save_character)
-        layout.addWidget(self.save_btn)
+        actions_layout.addWidget(self.save_btn)
 
-        self.setLayout(layout)
+        self.footer_layout = QVBoxLayout()
+        self.footer_layout.setContentsMargins(0, 0, 0, 0)
+        self.footer_layout.setSpacing(6)
+        actions_layout.addLayout(self.footer_layout)
+        actions_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        self.splitter.addWidget(actions_widget)
+        self.splitter.setStretchFactor(0, 2)
+        self.splitter.setStretchFactor(1, 1)
+        self.splitter.setSizes([400, 220])
+
+        layout.addWidget(self.splitter)
+
+    def add_footer_widget(self, widget):
+        self.footer_layout.addWidget(widget)
+
+    def add_footer_layout(self, layout):
+        self.footer_layout.addLayout(layout)
 
     def add_action(self):
         dialog = ActionDialog(parent=self)
@@ -200,9 +266,10 @@ class CharacterEditor(QWidget):
             }
             actions.append(action)
         # Collect resistances, vulnerabilities, immunities
+        token_image = self.token_edit.text().strip()
         resistances = self.resist_edit.text().strip()
         vulnerabilities = self.vuln_edit.text().strip()
         immunities = self.immune_edit.text().strip()
         # Placeholder: Save logic would go here, now includes new fields
-        # Example: character_data = {..., "Resistances": resistances, "Vulnerabilities": vulnerabilities, "Immunities": immunities, ...}
+        # Example: character_data = {..., "TokenImage": token_image, "Resistances": resistances, ...}
         QMessageBox.information(self, "Saved", "Character saved (placeholder).")

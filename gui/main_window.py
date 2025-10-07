@@ -1,6 +1,7 @@
 from PyQt5.QtWidgets import (
-    QMainWindow, QWidget, QTabWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy
+    QMainWindow, QWidget, QTabWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QFileDialog
 )
+import os
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -36,17 +37,28 @@ class MainWindow(QMainWindow):
         self.campaign_label = QLabel("No campaign loaded.")
         layout.addWidget(self.campaign_label, alignment=Qt.AlignHCenter)
 
-        # Center the button horizontally and vertically
-        button_layout = QHBoxLayout()
-        button_layout.addStretch(1)
-        btn = QPushButton("Create/Load Campaign")
-        btn.clicked.connect(self.open_campaign_dialog)
-        button_layout.addWidget(btn)
-        button_layout.addStretch(1)
+        layout.addStretch(1)
 
-        layout.addStretch(1)
-        layout.addLayout(button_layout)
-        layout.addStretch(1)
+        button_col = QVBoxLayout()
+        button_col.setSpacing(16)
+
+        create_btn = QPushButton("Create Campaign")
+        create_btn.setMinimumWidth(220)
+        create_btn.clicked.connect(lambda: self.open_campaign_dialog(mode="create"))
+        button_col.addWidget(create_btn, alignment=Qt.AlignHCenter)
+
+        load_btn = QPushButton("Load Campaign")
+        load_btn.setMinimumWidth(220)
+        load_btn.clicked.connect(self.load_campaign_direct)
+        button_col.addWidget(load_btn, alignment=Qt.AlignHCenter)
+
+        exit_btn = QPushButton("Exit")
+        exit_btn.setMinimumWidth(220)
+        exit_btn.clicked.connect(self.close)
+        button_col.addWidget(exit_btn, alignment=Qt.AlignHCenter)
+
+        layout.addLayout(button_col)
+        layout.addStretch(2)
 
         widget.setLayout(layout)
         widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -68,27 +80,38 @@ class MainWindow(QMainWindow):
         from gui.combat_tab import CombatTab
         return CombatTab(self)
 
-    def open_campaign_dialog(self):
+    def open_campaign_dialog(self, mode="both"):
         from gui.campaign_dialog import CampaignDialog
-        dialog = CampaignDialog(self)
+        dialog = CampaignDialog(self, mode=mode)
         if dialog.exec_():
-            self.campaign_name = dialog.campaign_name
-            self.campaign_folder = dialog.campaign_folder
-            self.campaign_label.setText(
-                f"Current Campaign: {self.campaign_name}\nFolder: {self.campaign_folder}"
-            )
-            # Refresh entity tabs after loading campaign
-            # Tab order: 0=Campaign, 1=Characters, 2=NPCs, 3=Notes
-            for idx in [1, 2, 3, 4]:
-                tab = self.tabs.widget(idx)
-                if hasattr(tab, "refresh_list"):
-                    tab.refresh_list()
-            # Load notes in Notes tab (assumed to be tab index 3)
-            notes_tab_index = 3
-            if self.tabs.count() > notes_tab_index:
-                notes_tab = self.tabs.widget(notes_tab_index)
-                if hasattr(notes_tab, "load_notes"):
-                    notes_tab.load_notes()
+            self._apply_campaign(dialog.campaign_name, dialog.campaign_folder)
+
+    def load_campaign_direct(self):
+        default_dir = os.path.expanduser('~/DnD_Campaigns/')
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select Existing Campaign Folder", default_dir
+        )
+        if folder:
+            name = os.path.basename(folder)
+            self._apply_campaign(name, folder)
+
+    def _apply_campaign(self, name, folder):
+        self.campaign_name = name
+        self.campaign_folder = folder
+        self.campaign_label.setText(
+            f"Current Campaign: {self.campaign_name}\nFolder: {self.campaign_folder}"
+        )
+        # Refresh entity tabs after loading campaign
+        for idx in [1, 2, 3, 4]:
+            tab = self.tabs.widget(idx)
+            if hasattr(tab, "refresh_list"):
+                tab.refresh_list()
+        # Load notes in Notes tab (assumed to be tab index 3)
+        notes_tab_index = 3
+        if self.tabs.count() > notes_tab_index:
+            notes_tab = self.tabs.widget(notes_tab_index)
+            if hasattr(notes_tab, "load_notes"):
+                notes_tab.load_notes()
 
     def _make_tab(self, name):
         widget = QWidget()

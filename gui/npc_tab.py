@@ -175,6 +175,7 @@ class NPCTab(QWidget):
             # Remove from UI
             self.refresh_list()
             self.editor.name_edit.clear()
+            self.editor.token_edit.clear()
             self.editor.type_combo.setCurrentIndex(0)
             self.editor.role_edit.clear()
             self.editor.ac_edit.clear()
@@ -194,6 +195,9 @@ class NPCTab(QWidget):
             self.editor.cr_edit.clear()
             self.editor.habitat_edit.clear()
             self.editor.desc_edit.clear()
+            self.editor.resist_edit.clear()
+            self.editor.vuln_edit.clear()
+            self.editor.immune_edit.clear()
             self.editor.clear_actions()
             self.editor.stat_block_edit.clear()
 
@@ -208,6 +212,7 @@ class NPCTab(QWidget):
     def new_npc(self):
         self.selected_index = None
         self.editor.name_edit.clear()
+        self.editor.token_edit.clear()
         self.editor.type_combo.setCurrentIndex(0)
         self.editor.role_edit.clear()
         self.editor.ac_edit.clear()
@@ -227,6 +232,9 @@ class NPCTab(QWidget):
         self.editor.cr_edit.clear()
         self.editor.habitat_edit.clear()
         self.editor.desc_edit.clear()
+        self.editor.resist_edit.clear()
+        self.editor.vuln_edit.clear()
+        self.editor.immune_edit.clear()
         self.editor.clear_actions()
         self.editor.stat_block_edit.clear()
 
@@ -235,6 +243,7 @@ class NPCTab(QWidget):
         npc = self.npcs[idx]
         self.selected_index = idx
         self.editor.name_edit.setText(npc.get("Name", ""))
+        self.editor.token_edit.setText(npc.get("TokenImage", ""))
         self.editor.type_combo.setCurrentText(npc.get("Type", "Neutral"))
         self.editor.role_edit.setText(npc.get("Role/Title", ""))
         self.editor.ac_edit.setText(str(npc.get("AC", "")))
@@ -254,6 +263,9 @@ class NPCTab(QWidget):
         self.editor.cr_edit.setText(npc.get("CR", ""))
         self.editor.habitat_edit.setText(npc.get("Habitat", ""))
         self.editor.desc_edit.setPlainText(npc.get("Description", ""))
+        self.editor.resist_edit.setText(npc.get("Resistances", ""))
+        self.editor.vuln_edit.setText(npc.get("Vulnerabilities", ""))
+        self.editor.immune_edit.setText(npc.get("Immunities", ""))
         actions = npc.get("Actions", [])
         self.editor.set_actions(actions)
         self.editor.stat_block_edit.clear()
@@ -299,6 +311,7 @@ class NPCTab(QWidget):
         npc_data = {
             "Name": self.editor.name_edit.text().strip(),
             "Type": self.editor.type_combo.currentText(),
+            "TokenImage": self.editor.token_edit.text().strip(),
             "Role/Title": self.editor.role_edit.text().strip(),
             "AC": self.editor.ac_edit.text().strip(),
             "HP": self.editor.hp_edit.text().strip(),
@@ -317,6 +330,9 @@ class NPCTab(QWidget):
             "CR": self.editor.cr_edit.text().strip(),
             "Habitat": self.editor.habitat_edit.text().strip(),
             "Description": self.editor.desc_edit.toPlainText().strip(),
+            "Resistances": self.editor.resist_edit.text().strip(),
+            "Vulnerabilities": self.editor.vuln_edit.text().strip(),
+            "Immunities": self.editor.immune_edit.text().strip(),
             "Actions": actions,
         }
         folder = self.main_window.campaign_folder

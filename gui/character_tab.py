@@ -1,8 +1,20 @@
 from PyQt5.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QListWidget, QPushButton, QMessageBox, QLabel, QListWidgetItem, QTableWidgetItem, QLineEdit, QApplication
+    QWidget,
+    QHBoxLayout,
+    QVBoxLayout,
+    QListWidget,
+    QPushButton,
+    QMessageBox,
+    QLabel,
+    QListWidgetItem,
+    QTableWidgetItem,
+    QLineEdit,
+    QApplication,
+    QSplitter,
 )
+from PyQt5.QtCore import Qt
 from gui.character_editor import CharacterEditor
-from utils.file_io import load_entities, save_entity
+from utils.file_io import load_entities
 from gui.global_log import GlobalLogWidget
 import os
 import json
@@ -13,8 +25,18 @@ class CharacterTab(QWidget):
         super().__init__()
         self.main_window = main_window
 
-        layout = QHBoxLayout()
-        left_layout = QVBoxLayout()
+        root_layout = QHBoxLayout(self)
+        root_layout.setContentsMargins(8, 8, 8, 8)
+        root_layout.setSpacing(12)
+
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        root_layout.addWidget(splitter)
+
+        sidebar = QWidget()
+        left_layout = QVBoxLayout(sidebar)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(6)
         self.list_widget = QListWidget()
         self.add_btn = QPushButton("+")
         self.add_btn.setToolTip("Add New Character")
@@ -27,22 +49,29 @@ class CharacterTab(QWidget):
         self.delete_btn.clicked.connect(self.delete_character)
         left_layout.addWidget(self.delete_btn)
         left_layout.addWidget(self.list_widget)
-        layout.addLayout(left_layout)
+        splitter.addWidget(sidebar)
 
         # --- AI Generation UI ---
         ai_layout = QHBoxLayout()
+        ai_layout.setContentsMargins(0, 0, 0, 0)
+        ai_layout.setSpacing(6)
         self.ai_desc_edit = QLineEdit()
         self.ai_desc_edit.setPlaceholderText("Describe the character to generate (e.g. 'elven wizard, level 5')")
         self.ai_generate_btn = QPushButton("Generate with AI")
         self.ai_generate_btn.clicked.connect(self.generate_with_ai)
         ai_layout.addWidget(self.ai_desc_edit)
         ai_layout.addWidget(self.ai_generate_btn)
-        layout.addLayout(ai_layout)
+
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(10)
+        right_layout.addLayout(ai_layout)
 
         self.editor = CharacterEditor()
         self.editor.save_btn.clicked.disconnect()
         self.editor.save_btn.clicked.connect(self.save_character)
-        layout.addWidget(self.editor)
+        right_layout.addWidget(self.editor, stretch=1)
 
         # Add "Copy Action as String" button below the actions table
         self.copy_action_btn = QPushButton("Copy Action as String")
@@ -63,10 +92,12 @@ class CharacterTab(QWidget):
             clipboard.setText(json.dumps(action, indent=2))
             QMessageBox.information(self, "Copied", "Selected action copied to clipboard as JSON.")
         self.copy_action_btn.clicked.connect(copy_selected_action)
-        self.editor.layout().addWidget(self.copy_action_btn)
+        self.editor.add_footer_widget(self.copy_action_btn)
 
         # Add AI Action Generation input and button
         ai_action_layout = QHBoxLayout()
+        ai_action_layout.setContentsMargins(0, 0, 0, 0)
+        ai_action_layout.setSpacing(6)
         self.ai_action_edit = QLineEdit()
         self.ai_action_edit.setPlaceholderText("Describe the action to generate (e.g. 'fireball attack')")
         self.ai_action_btn = QPushButton("Generate Action with AI")
@@ -102,9 +133,13 @@ class CharacterTab(QWidget):
         self.ai_action_btn.clicked.connect(generate_action_with_ai)
         ai_action_layout.addWidget(self.ai_action_edit)
         ai_action_layout.addWidget(self.ai_action_btn)
-        self.editor.layout().addLayout(ai_action_layout)
+        self.editor.add_footer_layout(ai_action_layout)
 
-        self.setLayout(layout)
+        right_layout.addStretch()
+        splitter.addWidget(right_panel)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 3)
+
         self.list_widget.itemClicked.connect(self.load_character)
 
         self.characters = []
@@ -122,6 +157,7 @@ class CharacterTab(QWidget):
     def new_character(self):
         self.selected_index = None
         self.editor.name_edit.clear()
+        self.editor.token_edit.clear()
         self.editor.race_edit.clear()
         self.editor.class_edit.clear()
         self.editor.level_edit.clear()
@@ -134,6 +170,9 @@ class CharacterTab(QWidget):
         self.editor.int_edit.clear()
         self.editor.wis_edit.clear()
         self.editor.cha_edit.clear()
+        self.editor.resist_edit.clear()
+        self.editor.vuln_edit.clear()
+        self.editor.immune_edit.clear()
         # Clear actions table
         self.editor.actions_table.setRowCount(0)
 
@@ -142,6 +181,7 @@ class CharacterTab(QWidget):
         char = self.characters[idx]
         self.selected_index = idx
         self.editor.name_edit.setText(char.get("Name", ""))
+        self.editor.token_edit.setText(char.get("TokenImage", ""))
         self.editor.race_edit.setText(char.get("Race", ""))
         self.editor.class_edit.setText(char.get("Class", ""))
         self.editor.level_edit.setText(str(char.get("Level", "")))
@@ -154,6 +194,9 @@ class CharacterTab(QWidget):
         self.editor.int_edit.setText(str(char.get("INT", "")))
         self.editor.wis_edit.setText(str(char.get("WIS", "")))
         self.editor.cha_edit.setText(str(char.get("CHA", "")))
+        self.editor.resist_edit.setText(char.get("Resistances", ""))
+        self.editor.vuln_edit.setText(char.get("Vulnerabilities", ""))
+        self.editor.immune_edit.setText(char.get("Immunities", ""))
         actions = char.get("Actions", [])
         self.editor.actions_table.setRowCount(0)
         for action in actions:
@@ -198,6 +241,7 @@ class CharacterTab(QWidget):
             actions.append(action)
         char_data = {
             "Name": self.editor.name_edit.text().strip(),
+            "TokenImage": self.editor.token_edit.text().strip(),
             "Race": self.editor.race_edit.text().strip(),
             "Class": self.editor.class_edit.text().strip(),
             "Level": self.editor.level_edit.text().strip(),
@@ -210,6 +254,9 @@ class CharacterTab(QWidget):
             "INT": self.editor.int_edit.text().strip(),
             "WIS": self.editor.wis_edit.text().strip(),
             "CHA": self.editor.cha_edit.text().strip(),
+            "Resistances": self.editor.resist_edit.text().strip(),
+            "Vulnerabilities": self.editor.vuln_edit.text().strip(),
+            "Immunities": self.editor.immune_edit.text().strip(),
             "Actions": actions,
         }
         folder = self.main_window.campaign_folder
@@ -306,6 +353,7 @@ class CharacterTab(QWidget):
             # Remove from UI
             self.refresh_list()
             self.editor.name_edit.clear()
+            self.editor.token_edit.clear()
             self.editor.race_edit.clear()
             self.editor.class_edit.clear()
             self.editor.level_edit.clear()
@@ -318,4 +366,7 @@ class CharacterTab(QWidget):
             self.editor.int_edit.clear()
             self.editor.wis_edit.clear()
             self.editor.cha_edit.clear()
+            self.editor.resist_edit.clear()
+            self.editor.vuln_edit.clear()
+            self.editor.immune_edit.clear()
             self.editor.actions_table.setRowCount(0)

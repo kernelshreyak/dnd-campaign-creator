@@ -16,8 +16,10 @@ from PyQt5.QtWidgets import (
     QComboBox,
 )
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QIcon, QPixmap, QTextCharFormat, QColor
 import random
 import re
+import os
 from utils.file_io import load_entities
 
 
@@ -283,6 +285,13 @@ class CombatTab(QWidget):
         super().__init__()
         self.main_window = main_window
         self.combatants = []
+        self._token_cache = {}
+        self._format_cache = {
+            "hit": self._make_format(QColor("#c62828")),
+            "fallen": self._make_format(QColor("#8e0000")),
+            "roll": self._make_format(QColor("#1e88e5")),
+            "default": self._make_format(QColor("#000000")),
+        }
 
         main_layout = QHBoxLayout()
         self.log_widget = QTextEdit()
@@ -304,35 +313,54 @@ class CombatTab(QWidget):
         add_layout.addStretch(1)
         right_layout.addLayout(add_layout)
 
-        # Table without “Deal Damage” column
-        self.table = QTableWidget(0, 13)
+        self.table = QTableWidget(0, 8)
         self.table.setHorizontalHeaderLabels(
             [
                 "Name",
                 "Type",
                 "HP",
                 "AC",
-                "STR",
-                "DEX",
-                "CON",
-                "INT",
-                "WIS",
-                "CHA",
                 "Initiative",
                 "Actions",
+                "Show Stats",
                 "Remove",
             ]
         )
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         right_layout.addWidget(self.table)
+        self.table.currentCellChanged.connect(
+            lambda row, _col, _old_row, _old_col: self.update_token_preview(row)
+        )
+
+        self.token_preview = QLabel("Select a combatant to preview token.")
+        self.token_preview.setAlignment(Qt.AlignCenter)
+        self.token_preview.setFixedHeight(160)
+        self.token_preview.setStyleSheet("border: 1px solid #ccc; background-color: #f8f8f8;")
+        right_layout.addWidget(self.token_preview)
 
         main_layout.addLayout(right_layout, stretch=2)
         self.setLayout(main_layout)
 
+    def _make_format(self, color):
+        fmt = QTextCharFormat()
+        fmt.setForeground(color)
+        return fmt
+
     def log_message(self, msg):
-        self.log_widget.append(msg)
-        self.log_widget.moveCursor(self.log_widget.textCursor().End)
+        if msg.startswith("Attack Roll") or msg.startswith("Damage") or "=" in msg:
+            fmt = self._format_cache["roll"]
+        elif "has fallen" in msg:
+            fmt = self._format_cache["fallen"]
+        elif "hits" in msg or "Attack Roll" in msg:
+            fmt = self._format_cache["hit"]
+        else:
+            fmt = self._format_cache["default"]
+
+        cursor = self.log_widget.textCursor()
+        cursor.movePosition(cursor.End)
+        cursor.insertText(msg + "\n", fmt)
+        self.log_widget.setTextCursor(cursor)
 
     def add_combatant(self):
         folder = self.main_window.campaign_folder
@@ -378,6 +406,7 @@ class CombatTab(QWidget):
                 "Resistances": ent.get("Resistances", ""),
                 "Vulnerabilities": ent.get("Vulnerabilities", ""),
                 "Immunities": ent.get("Immunities", ""),
+                "TokenImage": ent.get("TokenImage", ""),
             }
             self.combatants.append(combatant)
             self.refresh_table()
@@ -385,35 +414,106 @@ class CombatTab(QWidget):
     def refresh_table(self):
         self.table.setRowCount(len(self.combatants))
         for row, c in enumerate(self.combatants):
-            for col, key in enumerate(
-                [
-                    "Name",
-                    "Type",
-                    "HP",
-                    "AC",
-                    "STR",
-                    "DEX",
-                    "CON",
-                    "INT",
-                    "WIS",
-                    "CHA",
-                    "Initiative",
-                ]
-            ):
+            name_item = QTableWidgetItem(str(c.get("Name", "")))
+            pixmap = self._get_token_pixmap(c.get("TokenImage", ""))
+            if pixmap:
+                name_item.setIcon(QIcon(pixmap.scaled(32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
+            name_item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+            self.table.setItem(row, 0, name_item)
+
+            for offset, key in enumerate(["Type", "HP", "AC", "Initiative"], start=1):
                 item = QTableWidgetItem(str(c.get(key, "")))
                 item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
-                self.table.setItem(row, col, item)
+                self.table.setItem(row, offset, item)
 
-            # Actions button
             actions_btn = QPushButton("Actions")
             actions_btn.clicked.connect(lambda _, r=row: self.open_actions_dialog(r))
-            self.table.setCellWidget(row, 11, actions_btn)
+            self.table.setCellWidget(row, 5, actions_btn)
 
-            # Remove button (only active if HP == 0)
+            stats_btn = QPushButton("Show Stats")
+            stats_btn.clicked.connect(lambda _, r=row: self.show_stats_dialog(r))
+            self.table.setCellWidget(row, 6, stats_btn)
+
             rm_btn = QPushButton("Remove")
             rm_btn.setEnabled(int(c.get("HP", 0)) == 0)
             rm_btn.clicked.connect(lambda _, r=row: self.remove_combatant(r))
-            self.table.setCellWidget(row, 12, rm_btn)
+            self.table.setCellWidget(row, 7, rm_btn)
+
+        current_row = self.table.currentRow()
+        if current_row >= 0:
+            self.update_token_preview(current_row)
+        elif self.combatants:
+            self.table.selectRow(0)
+        else:
+            self.update_token_preview(-1)
+
+    def _get_token_pixmap(self, source):
+        if not source:
+            return None
+        if source in self._token_cache:
+            return self._token_cache[source]
+
+        pixmap = QPixmap()
+        try:
+            if source.lower().startswith(("http://", "https://")):
+                from urllib.request import urlopen
+
+                with urlopen(source) as resp:
+                    data = resp.read()
+                pixmap.loadFromData(data)
+            else:
+                if os.path.exists(source):
+                    pixmap.load(source)
+                else:
+                    pixmap.load(source)
+        except Exception:
+            pixmap = QPixmap()
+
+        if not pixmap.isNull():
+            self._token_cache[source] = pixmap
+            return pixmap
+
+        self._token_cache[source] = None
+        return None
+
+    def update_token_preview(self, row):
+        if row is None or row < 0 or row >= len(self.combatants):
+            self.token_preview.setText("Select a combatant to preview token.")
+            self.token_preview.setPixmap(QPixmap())
+            return
+        pixmap = self._get_token_pixmap(self.combatants[row].get("TokenImage", ""))
+        if pixmap and not pixmap.isNull():
+            scaled = pixmap.scaled(140, 140, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.token_preview.setPixmap(scaled)
+            self.token_preview.setText("")
+        else:
+            self.token_preview.setPixmap(QPixmap())
+            self.token_preview.setText("No token available.")
+
+    def show_stats_dialog(self, row):
+        if row < 0 or row >= len(self.combatants):
+            return
+        combatant = self.combatants[row]
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"{combatant.get('Name', 'Combatant')} Stats")
+        layout = QVBoxLayout()
+        for label, key in [
+            ("STR", "STR"),
+            ("DEX", "DEX"),
+            ("CON", "CON"),
+            ("INT", "INT"),
+            ("WIS", "WIS"),
+            ("CHA", "CHA"),
+            ("Resistances", "Resistances"),
+            ("Vulnerabilities", "Vulnerabilities"),
+            ("Immunities", "Immunities"),
+        ]:
+            layout.addWidget(QLabel(f"{label}: {combatant.get(key, '')}"))
+        btns = QDialogButtonBox(QDialogButtonBox.Ok)
+        btns.accepted.connect(dlg.accept)
+        layout.addWidget(btns)
+        dlg.setLayout(layout)
+        dlg.exec_()
 
     def open_actions_dialog(self, row):
         dlg = ActionDialog(

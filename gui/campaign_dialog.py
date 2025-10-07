@@ -1,12 +1,26 @@
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog, QMessageBox
+    QDialog,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QFileDialog,
+    QMessageBox,
+    QWidget,
 )
 import os
 
 class CampaignDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, mode="both"):
         super().__init__(parent)
-        self.setWindowTitle("Create or Load Campaign")
+        self.mode = mode
+        if mode == "create":
+            self.setWindowTitle("Create Campaign")
+        elif mode == "load":
+            self.setWindowTitle("Load Campaign")
+        else:
+            self.setWindowTitle("Create or Load Campaign")
         self.setMinimumWidth(400)
 
         self.campaign_name = ""
@@ -15,15 +29,19 @@ class CampaignDialog(QDialog):
         layout = QVBoxLayout()
 
         # Campaign name input
-        name_layout = QHBoxLayout()
+        name_container = QWidget()
+        name_layout = QHBoxLayout(name_container)
+        name_layout.setContentsMargins(0, 0, 0, 0)
         name_label = QLabel("Campaign Name:")
         self.name_edit = QLineEdit()
         name_layout.addWidget(name_label)
         name_layout.addWidget(self.name_edit)
-        layout.addLayout(name_layout)
+        layout.addWidget(name_container)
 
         # Folder selection
-        folder_layout = QHBoxLayout()
+        folder_container = QWidget()
+        folder_layout = QHBoxLayout(folder_container)
+        folder_layout.setContentsMargins(0, 0, 0, 0)
         folder_label = QLabel("Campaign Folder:")
         self.folder_edit = QLineEdit()
         self.folder_edit.setReadOnly(True)
@@ -32,7 +50,7 @@ class CampaignDialog(QDialog):
         folder_layout.addWidget(folder_label)
         folder_layout.addWidget(self.folder_edit)
         folder_layout.addWidget(folder_btn)
-        layout.addLayout(folder_layout)
+        layout.addWidget(folder_container)
 
         # Buttons
         btn_layout = QHBoxLayout()
@@ -46,6 +64,12 @@ class CampaignDialog(QDialog):
         btn_layout.addWidget(load_btn)
         btn_layout.addWidget(cancel_btn)
         layout.addLayout(btn_layout)
+
+        if self.mode == "create":
+            load_btn.hide()
+        elif self.mode == "load":
+            create_btn.hide()
+            name_container.hide()
 
         self.setLayout(layout)
 
