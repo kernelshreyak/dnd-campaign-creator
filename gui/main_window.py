@@ -6,7 +6,7 @@ import os
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("DnD 5e Campaign Creator")
+        self.setWindowTitle("DnD 5e Solo Campaign Creator")
         self.campaign_name = None
         self.campaign_folder = None
 

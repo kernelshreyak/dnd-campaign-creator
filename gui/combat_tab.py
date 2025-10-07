@@ -21,7 +21,7 @@ import random
 import re
 import os
 from utils.file_io import load_entities
-
+import openai
 
 # ---------- Helper functions ----------
 def roll_dice(formula):
@@ -71,20 +71,25 @@ def roll_damage(formula, crit=False):
 
 def apply_resist_vuln_immune(base_damage, damage_type, target):
     """Adjust damage for resistances, vulnerabilities, immunities."""
-    dtype = (damage_type or "").strip().lower()
+    dmg_types = parse_tags(damage_type)
     res = parse_tags(target.get("Resistances", ""))
     vul = parse_tags(target.get("Vulnerabilities", ""))
     imm = parse_tags(target.get("Immunities", ""))
-    if dtype and dtype in imm:
+    
+    # if immune to all damage types
+    if dmg_types and len(dmg_types & imm) == len(dmg_types):
         return 0, "immune"
+
     adjusted = base_damage
-    note = None
-    if dtype and dtype in res:
+    notes = []
+    if dmg_types and dmg_types & res:
         adjusted = base_damage // 2
-        note = "resistance"
-    if dtype and dtype in vul:
+        notes.append("resistance")
+    if dmg_types and dmg_types & vul:
         adjusted = adjusted * 2
-        note = "vulnerability" if note is None else note + "+vulnerability"
+        notes.append("vulnerability")
+
+    note = "+".join(notes) if notes else None
     return adjusted, note
 
 
@@ -228,7 +233,7 @@ class ActionDialog(QDialog):
         msg = f"{self.combatant['Name']} hits {target['Name']} with {action['name']}! {dmg_str}"
         if note:
             msg += f" ({note})"
-        msg += f" Damage: {adj_dmg}. HP: {hp_before} → {hp_after}."
+        msg += f" Damage: {adj_dmg} ({dmg_type}). HP: {hp_before} → {hp_after}."
         if crit:
             msg += " (Critical Hit!)"
         self.log_callback(msg)
@@ -238,23 +243,23 @@ class ActionDialog(QDialog):
 
         # 🎭 Enhanced AI narration with damage, effects, and death context
         try:
-            import openai
-
             dmg_text = f"{adj_dmg} {dmg_type} damage" if adj_dmg > 0 else "no damage"
             effect_text = action.get("description", "").strip()
             fallen = hp_after == 0
 
             prompt = (
                 "You are a dramatic and concise Dungeon Master narrator in D&D 5e combat. "
-                "Write 1–2 vivid, cinematic sentences describing the outcome of the action, "
-                "from a third-person perspective. "
+                "Write a vivid cinematic describing the outcome of the action, "
+                "from a third-person perspective."
+                "Take into account the calculation results provided,the action description as well as target's vulnerabilities, resistances and immunities to more accurately describe the oucome"
                 "Include tone, motion, and consequence, not numbers. "
                 "If the target is slain or falls to 0 HP, make it climactic and final. "
-                "Keep it short and punchy.\n\n"
-                f"Attacker: {self.combatant['Name']}\n"
+                "Keep it short but engaging enough.\n\n"
+                f"Attacker: {self.combatant['Name']} (class: {self.combatant['Class']}, race: {self.combatant['Race']})\n"
                 f"Action: {action.get('name', 'Unknown Action')}\n"
                 f"Description: {effect_text}\n"
-                f"Target: {target['Name']}\n"
+                f"Calculation by combat engine: {msg}\n"
+                f"Target: {target['Name']} (class: {self.combatant['Class']}, race: {self.combatant['Race']}, Immunities: {target['Immunities']}, Resistances: {target['Resistances']},Vulnerabilities {target['Vulnerabilities']})\n"
                 f"Hit: {hit}\n"
                 f"Critical: {crit}\n"
                 f"Damage: {dmg_text}\n"
@@ -393,6 +398,8 @@ class CombatTab(QWidget):
             combatant = {
                 "Name": ent.get("Name", ""),
                 "Type": typ,
+                "Class": ent.get("Class", ""),
+                "Race": ent.get("Race", ""),
                 "HP": int(ent.get("HP", 10)),
                 "AC": int(ent.get("AC", 10)),
                 "STR": int(ent.get("STR", 10)),
