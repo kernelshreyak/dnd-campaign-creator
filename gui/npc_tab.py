@@ -1,8 +1,21 @@
 from PyQt5.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QListWidget, QPushButton, QMessageBox, QLabel, QListWidgetItem, QApplication, QInputDialog, QTableWidgetItem, QLineEdit
+    QWidget,
+    QHBoxLayout,
+    QVBoxLayout,
+    QListWidget,
+    QPushButton,
+    QMessageBox,
+    QLabel,
+    QListWidgetItem,
+    QApplication,
+    QInputDialog,
+    QTableWidgetItem,
+    QLineEdit,
+    QSplitter,
 )
+from PyQt5.QtCore import Qt
 from gui.npc_editor import NPCEditor
-from utils.file_io import load_entities, save_entity
+from utils.file_io import load_entities
 import json
 
 class NPCTab(QWidget):
@@ -10,26 +23,51 @@ class NPCTab(QWidget):
         super().__init__()
         self.main_window = main_window
 
-        layout = QHBoxLayout()
-        left_layout = QVBoxLayout()
+        # --- Main horizontal layout with resizable panels ---
+        root_layout = QHBoxLayout(self)
+        root_layout.setContentsMargins(8, 8, 8, 8)
+        root_layout.setSpacing(12)
+
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        root_layout.addWidget(splitter)
+
+        # --- NPC list sidebar ---
+        sidebar = QWidget()
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(0, 0, 0, 0)
+        sidebar_layout.setSpacing(6)
+
+        sidebar_layout.addWidget(QLabel("NPCs"))
+
+        controls_layout = QHBoxLayout()
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+
         self.list_widget = QListWidget()
         self.add_btn = QPushButton("+")
         self.add_btn.setToolTip("Add New NPC")
         self.add_btn.clicked.connect(self.new_npc)
-        left_layout.addWidget(QLabel("NPCs"))
-        left_layout.addWidget(self.add_btn)
-        # Add Delete button for NPCs
+
         self.delete_btn = QPushButton("Delete")
         self.delete_btn.setToolTip("Delete Selected NPC")
         self.delete_btn.clicked.connect(self.delete_npc)
-        left_layout.addWidget(self.delete_btn)
-        left_layout.addWidget(self.list_widget)
-        layout.addLayout(left_layout, stretch=1)
 
-        # Only add the editor widget to the right side of the main layout
+        controls_layout.addWidget(self.add_btn)
+        controls_layout.addWidget(self.delete_btn)
+        sidebar_layout.addLayout(controls_layout)
+        sidebar_layout.addWidget(self.list_widget, stretch=1)
+
+        splitter.addWidget(sidebar)
+
+        # --- Editor pane ---
+        editor_panel = QWidget()
+        editor_layout = QVBoxLayout(editor_panel)
+        editor_layout.setContentsMargins(0, 0, 0, 0)
+        editor_layout.setSpacing(8)
+
         self.editor = NPCEditor()
         self.editor.save_btn.clicked.connect(self.save_npc)
-        layout.addWidget(self.editor, stretch=2)
+        editor_layout.addWidget(self.editor, stretch=1)
 
         # Add "Copy Action as String" button below the actions table
 
@@ -51,7 +89,7 @@ class NPCTab(QWidget):
             clipboard.setText(json.dumps(action, indent=2))
             QMessageBox.information(self, "Copied", "Selected action copied to clipboard as JSON.")
         self.copy_action_btn.clicked.connect(copy_selected_action)
-        self.editor.layout().addWidget(self.copy_action_btn)
+        editor_layout.addWidget(self.copy_action_btn, alignment=Qt.AlignLeft)
 
         # Add AI Action Generation input and button
         ai_action_layout = QHBoxLayout()
@@ -92,9 +130,14 @@ class NPCTab(QWidget):
         self.ai_action_btn.clicked.connect(generate_action_with_ai)
         ai_action_layout.addWidget(self.ai_action_edit)
         ai_action_layout.addWidget(self.ai_action_btn)
-        self.editor.layout().addLayout(ai_action_layout)
+        editor_layout.addLayout(ai_action_layout)
+        editor_layout.addStretch()
 
-        self.setLayout(layout)
+        splitter.addWidget(editor_panel)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 3)
+
+        self.setLayout(root_layout)
         self.list_widget.itemClicked.connect(self.load_npc)
 
         self.npcs = []

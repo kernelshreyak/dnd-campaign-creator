@@ -84,6 +84,13 @@ class CharacterEditor(QWidget):
         self.form.addRow("INT:", self.int_edit)
         self.form.addRow("WIS:", self.wis_edit)
         self.form.addRow("CHA:", self.cha_edit)
+        # Add Resistances, Vulnerabilities, Immunities
+        self.resist_edit = QLineEdit()
+        self.vuln_edit = QLineEdit()
+        self.immune_edit = QLineEdit()
+        self.form.addRow("Resistances:", self.resist_edit)
+        self.form.addRow("Vulnerabilities:", self.vuln_edit)
+        self.form.addRow("Immunities:", self.immune_edit)
         layout.addLayout(self.form)
 
         # Roll stats button
@@ -192,5 +199,10 @@ class CharacterEditor(QWidget):
                 "description": self.actions_table.item(row, 5).text() if self.actions_table.item(row, 5) else "",
             }
             actions.append(action)
-        # Placeholder: Save logic would go here
+        # Collect resistances, vulnerabilities, immunities
+        resistances = self.resist_edit.text().strip()
+        vulnerabilities = self.vuln_edit.text().strip()
+        immunities = self.immune_edit.text().strip()
+        # Placeholder: Save logic would go here, now includes new fields
+        # Example: character_data = {..., "Resistances": resistances, "Vulnerabilities": vulnerabilities, "Immunities": immunities, ...}
         QMessageBox.information(self, "Saved", "Character saved (placeholder).")

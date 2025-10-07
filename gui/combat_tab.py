@@ -18,7 +18,6 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 import random
 import re
-import json
 from utils.file_io import load_entities
 
 
@@ -235,25 +234,43 @@ class ActionDialog(QDialog):
         if hp_before > 0 and hp_after == 0:
             self.log_callback(f"{target['Name']} has fallen!")
 
-        # Optional AI narration
+        # 🎭 Enhanced AI narration with damage, effects, and death context
         try:
             import openai
 
+            dmg_text = f"{adj_dmg} {dmg_type} damage" if adj_dmg > 0 else "no damage"
+            effect_text = action.get("description", "").strip()
+            fallen = hp_after == 0
+
             prompt = (
-                f"You are a D&D 5e DM narrator. Describe in one vivid sentence how "
-                f"{self.combatant['Name']}'s {action['name']} strikes {target['Name']}."
+                "You are a dramatic and concise Dungeon Master narrator in D&D 5e combat. "
+                "Write 1–2 vivid, cinematic sentences describing the outcome of the action, "
+                "from a third-person perspective. "
+                "Include tone, motion, and consequence, not numbers. "
+                "If the target is slain or falls to 0 HP, make it climactic and final. "
+                "Keep it short and punchy.\n\n"
+                f"Attacker: {self.combatant['Name']}\n"
+                f"Action: {action.get('name', 'Unknown Action')}\n"
+                f"Description: {effect_text}\n"
+                f"Target: {target['Name']}\n"
+                f"Hit: {hit}\n"
+                f"Critical: {crit}\n"
+                f"Damage: {dmg_text}\n"
+                f"Target HP before: {hp_before}, after: {hp_after}\n"
+                f"Target Fallen: {fallen}\n"
             )
+
             resp = openai.chat.completions.create(
                 model="gpt-4.1-mini",
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=50,
-                temperature=0.9,
+                max_tokens=120,
+                temperature=1.0,
             )
             narration = resp.choices[0].message.content.strip()
             if narration:
                 self.log_callback(f"DM: {narration}")
-        except Exception:
-            pass
+        except Exception as e:
+            self.log_callback(f"[Narration skipped: {e}]")
 
         # ✅ ensure table refreshes to show updated HP
         parent_tab = self.parent()

@@ -1,8 +1,25 @@
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QLineEdit, QTextEdit, QFormLayout, QPushButton, QMessageBox, QComboBox, QHBoxLayout,
-    QTableWidget, QTableWidgetItem, QHeaderView, QDialog, QDialogButtonBox, QGridLayout
+    QWidget,
+    QVBoxLayout,
+    QLabel,
+    QLineEdit,
+    QTextEdit,
+    QFormLayout,
+    QPushButton,
+    QMessageBox,
+    QComboBox,
+    QHBoxLayout,
+    QTableWidget,
+    QTableWidgetItem,
+    QHeaderView,
+    QDialog,
+    QDialogButtonBox,
+    QGridLayout,
+    QSplitter,
+    QScrollArea,
+    QSizePolicy,
 )
-import re
+from PyQt5.QtCore import Qt
 import os
 import openai
 import json
@@ -56,24 +73,41 @@ class ActionDialog(QDialog):
 class NPCEditor(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        layout = QVBoxLayout()
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
 
         # OpenAI API key input (optional, fallback to env var)
         self.api_key_edit = QLineEdit()
         self.api_key_edit.setPlaceholderText("OpenAI API Key (or set OPENAI_API_KEY env var)")
         layout.addWidget(self.api_key_edit)
-
-        # Stat block input
+        
+        # Stat block input (with max height)
         layout.addWidget(QLabel("Paste NPC/Monster Stat Block:"))
         self.stat_block_edit = QTextEdit()
+        self.stat_block_edit.setMaximumHeight(120)
         layout.addWidget(self.stat_block_edit)
+        
+        # --- Main vertical splitter for form and actions ---
+        self.splitter = QSplitter(Qt.Vertical)
+        self.splitter.setChildrenCollapsible(False)
 
-        self.parse_btn = QPushButton("Parse Stat Block (AI)")
-        self.parse_btn.clicked.connect(self.parse_stat_block)
-        layout.addWidget(self.parse_btn)
+        # --- Form area in a scroll area ---
+        form_scroll = QScrollArea()
+        form_scroll.setWidgetResizable(True)
+
+        form_container = QWidget()
+        form_container_layout = QVBoxLayout(form_container)
+        form_container_layout.setContentsMargins(12, 12, 12, 12)
+        form_container_layout.setSpacing(10)
+
+        self.form = QFormLayout()
+        self.form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        self.form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.form.setFormAlignment(Qt.AlignTop | Qt.AlignLeft)
 
         # NPC fields
-        self.form = QFormLayout()
         self.name_edit = QLineEdit()
         self.type_combo = QComboBox()
         self.type_combo.addItems(["Hostile", "Friendly", "Neutral"])
@@ -95,6 +129,10 @@ class NPCEditor(QWidget):
         self.cr_edit = QLineEdit()
         self.habitat_edit = QLineEdit()
         self.desc_edit = QTextEdit()
+        self.resist_edit = QLineEdit()
+        self.vuln_edit = QLineEdit()
+        self.immune_edit = QLineEdit()
+
         self.form.addRow("Name:", self.name_edit)
         self.form.addRow("Type:", self.type_combo)
         self.form.addRow("Role/Title:", self.role_edit)
@@ -115,34 +153,54 @@ class NPCEditor(QWidget):
         self.form.addRow("CR:", self.cr_edit)
         self.form.addRow("Habitat:", self.habitat_edit)
         self.form.addRow("Description:", self.desc_edit)
-        layout.addLayout(self.form)
+        self.form.addRow("Resistances:", self.resist_edit)
+        self.form.addRow("Vulnerabilities:", self.vuln_edit)
+        self.form.addRow("Immunities:", self.immune_edit)
 
-        # Actions section as table
-        layout.addWidget(QLabel("Actions:"))
+        form_container_layout.addLayout(self.form)
+        form_container_layout.addStretch()
+
+        form_scroll.setWidget(form_container)
+        self.splitter.addWidget(form_scroll)
+
+        # --- Actions area (table + buttons) ---
         self.actions_table = QTableWidget(0, 6)
         self.actions_table.setHorizontalHeaderLabels(["Name", "Type", "Attack Bonus", "Damage", "Damage Type", "Description"])
         self.actions_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        layout.addWidget(self.actions_table)
-
-        actions_btn_layout = QHBoxLayout()
+        
         self.add_action_btn = QPushButton("Add Action")
         self.edit_action_btn = QPushButton("Edit Action")
         self.remove_action_btn = QPushButton("Remove Action")
+        self.save_btn = QPushButton("Save NPC")
+        self.save_btn.clicked.connect(self.save_npc)
+        
+        actions_widget = QWidget()
+        actions_layout = QVBoxLayout(actions_widget)
+        actions_layout.setContentsMargins(0, 0, 0, 0)
+        actions_layout.addWidget(QLabel("Actions:"))
+        actions_layout.addWidget(self.actions_table)
+        actions_btn_layout = QHBoxLayout()
         actions_btn_layout.addWidget(self.add_action_btn)
         actions_btn_layout.addWidget(self.edit_action_btn)
         actions_btn_layout.addWidget(self.remove_action_btn)
-        layout.addLayout(actions_btn_layout)
+        actions_layout.addLayout(actions_btn_layout)
+        actions_layout.addWidget(self.save_btn)
+        actions_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.splitter.addWidget(actions_widget)
+        
+        self.splitter.setStretchFactor(0, 2)
+        self.splitter.setStretchFactor(1, 1)
+        self.splitter.setSizes([400, 200])  # Initial split
+        
+        layout.addWidget(self.splitter)
+
+        self.parse_btn = QPushButton("Parse Stat Block (AI)")
+        self.parse_btn.clicked.connect(self.parse_stat_block)
+        layout.addWidget(self.parse_btn)
 
         self.add_action_btn.clicked.connect(self.add_action)
         self.edit_action_btn.clicked.connect(self.edit_action)
         self.remove_action_btn.clicked.connect(self.remove_action)
-
-        # Save button
-        self.save_btn = QPushButton("Save NPC")
-        self.save_btn.clicked.connect(self.save_npc)
-        layout.addWidget(self.save_btn)
-
-        self.setLayout(layout)
 
     def set_actions(self, actions):
         """Set the actions table from a list of action dicts."""
@@ -191,39 +249,94 @@ class NPCEditor(QWidget):
 
         prompt = (
             "You are an expert D&D 5e NPC stat block parser. "
-            "Given a pasted stat block, output a JSON object with all fields filled, auto-generating any missing content. "
-            "Actions must be a list of objects with fields: name, type (attack, ability, etc.), attack_bonus, damage, damage_type, description. "
-            "Fill all fields for automation. Example output:\n"
-            "{\n"
-            "  \"Name\": \"Veteran\",\n"
-            "  \"Type\": \"Hostile\",\n"
-            "  \"Role/Title\": \"Mercenary\",\n"
-            "  \"AC\": 17,\n"
-            "  \"HP\": 58,\n"
-            "  \"Initiative\": 1,\n"
-            "  \"Speed\": \"30 ft.\",\n"
-            "  \"STR\": 16,\n"
-            "  \"DEX\": 13,\n"
-            "  \"CON\": 14,\n"
-            "  \"INT\": 10,\n"
-            "  \"WIS\": 11,\n"
-            "  \"CHA\": 10,\n"
-            "  \"Skills\": \"Athletics +5, Perception +2\",\n"
-            "  \"Gear\": \"Heavy Crossbow, Longsword, Shortsword\",\n"
-            "  \"Senses\": \"Passive Perception 12\",\n"
-            "  \"Languages\": \"Any one language (usually Common)\",\n"
-            "  \"CR\": \"3 (XP 700; PB +2)\",\n"
-            "  \"Habitat\": \"Urban\",\n"
-            "  \"Description\": \"A grizzled mercenary veteran.\",\n"
-            "  \"Actions\": [\n"
-            "    {\"name\": \"Multiattack\", \"type\": \"ability\", \"attack_bonus\": null, \"damage\": null, \"damage_type\": null, \"description\": \"The veteran makes two longsword attacks. If it has a shortsword drawn, it can also make a shortsword attack.\"},\n"
-            "    {\"name\": \"Longsword\", \"type\": \"attack\", \"attack_bonus\": 5, \"damage\": \"1d8+3\", \"damage_type\": \"slashing\", \"description\": \"Melee Weapon Attack: +5 to hit, reach 5 ft., one target. Hit: 7 (1d8 + 3) slashing damage, or 8 (1d10 + 3) slashing damage if used with two hands.\"}\n"
-            "  ]\n"
-            "}\n"
-            "Stat block:\n"
-            f"{text}\n"
-            "Output JSON only."
+            "Read the provided stat block and populate every field in the response schema. "
+            "Fill missing information with reasonable defaults based on the stat block context. "
+            "List ALL actions, including specials such as reactions, bonus actions, and legendary actions. "
+            "For legendary actions, set the action type to \"legendary\" and include recharge notes in the description. "
+            "Parse resistances, vulnerabilities, and immunities exactly as written when they appear; leave them empty strings if truly absent. "
+            "Preserve quantities (e.g., HP numbers, save DCs, damage dice) as strings. "
+            "Use concise text without markdown. "
+            "Stat block follows:\n"
+            f"{text}"
         )
+
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "npc_stat_block",
+                "schema": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "Name": {"type": "string"},
+                        "Type": {"type": "string"},
+                        "Role/Title": {"type": "string"},
+                        "AC": {"type": "string"},
+                        "HP": {"type": "string"},
+                        "Initiative": {"type": "string"},
+                        "Speed": {"type": "string"},
+                        "STR": {"type": "string"},
+                        "DEX": {"type": "string"},
+                        "CON": {"type": "string"},
+                        "INT": {"type": "string"},
+                        "WIS": {"type": "string"},
+                        "CHA": {"type": "string"},
+                        "Skills": {"type": "string"},
+                        "Gear": {"type": "string"},
+                        "Senses": {"type": "string"},
+                        "Languages": {"type": "string"},
+                        "CR": {"type": "string"},
+                        "Habitat": {"type": "string"},
+                        "Description": {"type": "string"},
+                        "Resistances": {"type": "string"},
+                        "Vulnerabilities": {"type": "string"},
+                        "Immunities": {"type": "string"},
+                        "Actions": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "type": {"type": "string"},
+                                    "attack_bonus": {"type": ["string", "null"]},
+                                    "damage": {"type": ["string", "null"]},
+                                    "damage_type": {"type": ["string", "null"]},
+                                    "description": {"type": "string"},
+                                },
+                                "required": ["name", "type", "attack_bonus", "damage", "damage_type", "description"],
+                            },
+                        },
+                    },
+                    "required": [
+                        "Name",
+                        "Type",
+                        "Role/Title",
+                        "AC",
+                        "HP",
+                        "Initiative",
+                        "Speed",
+                        "STR",
+                        "DEX",
+                        "CON",
+                        "INT",
+                        "WIS",
+                        "CHA",
+                        "Skills",
+                        "Gear",
+                        "Senses",
+                        "Languages",
+                        "CR",
+                        "Habitat",
+                        "Description",
+                        "Resistances",
+                        "Vulnerabilities",
+                        "Immunities",
+                        "Actions",
+                    ],
+                },
+            },
+        }
 
         try:
             openai.api_key = api_key
@@ -232,7 +345,7 @@ class NPCEditor(QWidget):
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=1200,
                 temperature=0.2,
-                response_format={"type": "json_object"}
+                response_format=response_format,
             )
             content = response.choices[0].message.content
             npc_data = json.loads(content)
@@ -260,6 +373,9 @@ class NPCEditor(QWidget):
         self.cr_edit.setText(str(npc_data.get("CR", "")))
         self.habitat_edit.setText(str(npc_data.get("Habitat", "")))
         self.desc_edit.setPlainText(str(npc_data.get("Description", "")))
+        self.resist_edit.setText(str(npc_data.get("Resistances", "")))
+        self.vuln_edit.setText(str(npc_data.get("Vulnerabilities", "")))
+        self.immune_edit.setText(str(npc_data.get("Immunities", "")))
         # Set type
         t = str(npc_data.get("Type", "Neutral"))
         if t in ["Hostile", "Friendly", "Neutral"]:
@@ -314,5 +430,10 @@ class NPCEditor(QWidget):
                 "description": self.actions_table.item(row, 5).text() if self.actions_table.item(row, 5) else "",
             }
             actions.append(action)
-        # Placeholder: Save logic would go here
+        # Collect resistances, vulnerabilities, immunities
+        resistances = self.resist_edit.text().strip()
+        vulnerabilities = self.vuln_edit.text().strip()
+        immunities = self.immune_edit.text().strip()
+        # Placeholder: Save logic would go here, now includes new fields
+        # Example: npc_data = {..., "Resistances": resistances, "Vulnerabilities": vulnerabilities, "Immunities": immunities, ...}
         QMessageBox.information(self, "Saved", "NPC saved (placeholder).")
