@@ -112,6 +112,11 @@ class MainWindow(QMainWindow):
             notes_tab = self.tabs.widget(notes_tab_index)
             if hasattr(notes_tab, "load_notes"):
                 notes_tab.load_notes()
+        combat_tab_index = 4
+        if self.tabs.count() > combat_tab_index:
+            combat_tab = self.tabs.widget(combat_tab_index)
+            if hasattr(combat_tab, "load_saved_state"):
+                combat_tab.load_saved_state()
 
     def _make_tab(self, name):
         widget = QWidget()

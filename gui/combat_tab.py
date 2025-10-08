@@ -14,12 +14,14 @@ from PyQt5.QtWidgets import (
     QDialogButtonBox,
     QTextEdit,
     QComboBox,
+    QPlainTextEdit,
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon, QPixmap, QTextCharFormat, QColor
 import random
 import re
 import os
+import json
 from utils.file_io import load_entities
 import openai
 
@@ -283,6 +285,8 @@ class ActionDialog(QDialog):
         parent_tab = self.parent()
         if parent_tab and hasattr(parent_tab, "refresh_table"):
             parent_tab.refresh_table()
+        if parent_tab and hasattr(parent_tab, "save_state"):
+            parent_tab.save_state(silent=True)
 
 
 class CombatTab(QWidget):
@@ -297,12 +301,36 @@ class CombatTab(QWidget):
             "roll": self._make_format(QColor("#1e88e5")),
             "default": self._make_format(QColor("#000000")),
         }
+        self.active_speaker = None
+        self.dm_speaker = {"Name": "Dungeon Master", "Type": "Narrator"}
 
         main_layout = QHBoxLayout()
+
+        left_layout = QVBoxLayout()
         self.log_widget = QTextEdit()
         self.log_widget.setReadOnly(True)
         self.log_widget.setLineWrapMode(QTextEdit.WidgetWidth)
-        main_layout.addWidget(self.log_widget, stretch=1)
+        left_layout.addWidget(self.log_widget, stretch=1)
+
+        self.speaker_label = QLabel("Speaking as: None")
+        left_layout.addWidget(self.speaker_label)
+
+        self.chat_input = QPlainTextEdit()
+        self.chat_input.setPlaceholderText("Type in-character dialogue...")
+        self.chat_input.setFixedHeight(80)
+        left_layout.addWidget(self.chat_input)
+
+        chat_btn_row = QHBoxLayout()
+        self.chat_send_btn = QPushButton("Send")
+        self.chat_send_btn.clicked.connect(self.send_chat)
+        chat_btn_row.addWidget(self.chat_send_btn, alignment=Qt.AlignLeft)
+        self.chat_dm_btn = QPushButton("Chat as DM")
+        self.chat_dm_btn.clicked.connect(self.chat_as_dm)
+        chat_btn_row.addWidget(self.chat_dm_btn, alignment=Qt.AlignLeft)
+        chat_btn_row.addStretch(1)
+        left_layout.addLayout(chat_btn_row)
+
+        main_layout.addLayout(left_layout, stretch=1)
 
         right_layout = QVBoxLayout()
         add_layout = QHBoxLayout()
@@ -315,10 +343,14 @@ class CombatTab(QWidget):
         self.roll_initiative_btn.clicked.connect(self.roll_initiative)
         add_layout.addWidget(self.roll_initiative_btn)
 
+        self.save_state_btn = QPushButton("Save Combat State")
+        self.save_state_btn.clicked.connect(self.save_state)
+        add_layout.addWidget(self.save_state_btn)
+
         add_layout.addStretch(1)
         right_layout.addLayout(add_layout)
 
-        self.table = QTableWidget(0, 8)
+        self.table = QTableWidget(0, 9)
         self.table.setHorizontalHeaderLabels(
             [
                 "Name",
@@ -326,6 +358,7 @@ class CombatTab(QWidget):
                 "HP",
                 "AC",
                 "Initiative",
+                "Chat As",
                 "Actions",
                 "Show Stats",
                 "Remove",
@@ -346,6 +379,7 @@ class CombatTab(QWidget):
 
         main_layout.addLayout(right_layout, stretch=2)
         self.setLayout(main_layout)
+        self._update_speaker_label()
 
     def _make_format(self, color):
         fmt = QTextCharFormat()
@@ -417,6 +451,7 @@ class CombatTab(QWidget):
             }
             self.combatants.append(combatant)
             self.refresh_table()
+            self.save_state(silent=True)
 
     def refresh_table(self):
         self.table.setRowCount(len(self.combatants))
@@ -433,18 +468,22 @@ class CombatTab(QWidget):
                 item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
                 self.table.setItem(row, offset, item)
 
+            chat_btn = QPushButton("Chat As")
+            chat_btn.clicked.connect(lambda _, r=row: self.chat_as(r))
+            self.table.setCellWidget(row, 5, chat_btn)
+
             actions_btn = QPushButton("Actions")
             actions_btn.clicked.connect(lambda _, r=row: self.open_actions_dialog(r))
-            self.table.setCellWidget(row, 5, actions_btn)
+            self.table.setCellWidget(row, 6, actions_btn)
 
             stats_btn = QPushButton("Show Stats")
             stats_btn.clicked.connect(lambda _, r=row: self.show_stats_dialog(r))
-            self.table.setCellWidget(row, 6, stats_btn)
+            self.table.setCellWidget(row, 7, stats_btn)
 
             rm_btn = QPushButton("Remove")
             rm_btn.setEnabled(int(c.get("HP", 0)) == 0)
             rm_btn.clicked.connect(lambda _, r=row: self.remove_combatant(r))
-            self.table.setCellWidget(row, 7, rm_btn)
+            self.table.setCellWidget(row, 8, rm_btn)
 
         current_row = self.table.currentRow()
         if current_row >= 0:
@@ -453,6 +492,108 @@ class CombatTab(QWidget):
             self.table.selectRow(0)
         else:
             self.update_token_preview(-1)
+        self._update_speaker_label()
+
+    def chat_as(self, row):
+        if row < 0 or row >= len(self.combatants):
+            return
+        self.active_speaker = self.combatants[row]
+        self.table.selectRow(row)
+        self._update_speaker_label()
+
+    def _update_speaker_label(self):
+        if (
+            self.active_speaker not in self.combatants
+            and self.active_speaker is not self.dm_speaker
+        ):
+            self.active_speaker = None
+        if self.active_speaker is self.dm_speaker:
+            self.speaker_label.setText("Speaking as: Dungeon Master")
+        elif self.active_speaker:
+            name = self.active_speaker.get("Name", "Unknown")
+            self.speaker_label.setText(f"Speaking as: {name}")
+        else:
+            self.speaker_label.setText("Speaking as: None")
+
+    def chat_as_dm(self):
+        self.active_speaker = self.dm_speaker
+        self._update_speaker_label()
+
+    def send_chat(self):
+        message = self.chat_input.toPlainText().strip()
+        if not message:
+            return
+        if not self.active_speaker:
+            QMessageBox.warning(
+                self,
+                "No Speaker Selected",
+                "Choose a combatant to speak as using the 'Chat As' button.",
+            )
+            return
+        name = self.active_speaker.get("Name", "Unknown")
+        self.log_message(f"{name} said: {message}")
+        self.chat_input.clear()
+        self.save_state(silent=True)
+
+    def _state_file_path(self):
+        folder = getattr(self.main_window, "campaign_folder", None)
+        if not folder:
+            return None
+        return os.path.join(folder, "combat_state.json")
+
+    def save_state(self, silent=False):
+        path = self._state_file_path()
+        if not path:
+            if not silent:
+                QMessageBox.warning(self, "No Campaign", "Load a campaign before saving combat state.")
+            return
+        state = {
+            "combatants": self.combatants,
+            "log_lines": self.log_widget.toPlainText().splitlines(),
+            "active_speaker": (
+                "__DM__" if self.active_speaker is self.dm_speaker else self.active_speaker.get("Name")
+            )
+        }
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(state, f, indent=2)
+            if not silent:
+                QMessageBox.information(self, "Combat Saved", f"Combat state saved to {path}")
+        except Exception as exc:
+            QMessageBox.critical(self, "Save Error", f"Failed to save combat state:\n{exc}")
+
+    def load_saved_state(self):
+        path = self._state_file_path()
+        self.log_widget.clear()
+        self.chat_input.clear()
+        self._token_cache.clear()
+        if not path or not os.path.exists(path):
+            self.combatants = []
+            self.active_speaker = None
+            self.refresh_table()
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as exc:
+            QMessageBox.warning(self, "Load Warning", f"Could not load combat state:\n{exc}")
+            self.combatants = []
+            self.active_speaker = None
+            self.refresh_table()
+            return
+
+        self.combatants = data.get("combatants", [])
+        speaker_name = data.get("active_speaker")
+        if speaker_name == "__DM__":
+            self.active_speaker = self.dm_speaker
+        else:
+            self.active_speaker = next(
+                (c for c in self.combatants if c.get("Name") == speaker_name), None
+            )
+        for line in data.get("log_lines", []):
+            if isinstance(line, str):
+                self.log_message(line)
+        self.refresh_table()
 
     def _get_token_pixmap(self, source):
         if not source:
@@ -542,11 +683,15 @@ class CombatTab(QWidget):
             return
         name = combatant.get("Name", "Unknown")
         del self.combatants[row]
+        if self.active_speaker is combatant:
+            self.active_speaker = None
         self.log_message(f"{name} has been removed from combat.")
         self.refresh_table()
+        self.save_state(silent=True)
 
     def roll_initiative(self):
         for c in self.combatants:
             c["Initiative"] = random.randint(1, 20)
         self.combatants.sort(key=lambda x: int(x.get("Initiative", 0)), reverse=True)
         self.refresh_table()
+        self.save_state(silent=True)
